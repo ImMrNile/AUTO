@@ -347,7 +347,7 @@ export async function POST(request: NextRequest) {
     console.log('✅ Артикул и штрихкод соответствуют требованиям');
 
     // Получаем характеристики категории из БД для ИИ
-    let categoryCharacteristics = [];
+    let categoryCharacteristics: any[] = [];
     try {
       categoryCharacteristics = await prisma.wbCategoryCharacteristic.findMany({
         where: { subcategoryId: parseInt(productData.categoryId) },
@@ -523,7 +523,7 @@ export async function POST(request: NextRequest) {
     let enhancedResult = null;
     try {
       // Подготавливаем характеристики для ИИ в правильном формате
-      const characteristicsForAI = categoryCharacteristics.map(char => ({
+      const characteristicsForAI = categoryCharacteristics.map((char: any) => ({
         id: char.wbCharacteristicId || char.id,
         name: char.name,
         type: char.type,
@@ -532,7 +532,7 @@ export async function POST(request: NextRequest) {
         maxLength: char.maxLength,
         minValue: char.minValue,
         maxValue: char.maxValue,
-        values: (char.values || []).map(v => ({
+        values: (char.values || []).map((v: any) => ({
           id: v.wbValueId || v.id,
           value: v.value,
           displayName: v.displayName || v.value
