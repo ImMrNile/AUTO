@@ -347,7 +347,7 @@ export async function POST(request: NextRequest) {
     console.log('✅ Артикул и штрихкод соответствуют требованиям');
 
     // Получаем характеристики категории из БД для ИИ
-    let categoryCharacteristics = [];
+    let categoryCharacteristics: any[] = [];
     try {
       categoryCharacteristics = await prisma.wbCategoryCharacteristic.findMany({
         where: { subcategoryId: parseInt(productData.categoryId) },
@@ -370,7 +370,7 @@ export async function POST(request: NextRequest) {
       categoryCharacteristics.forEach((char, index) => {
         console.log(`  ${index + 1}. ${char.name} (ID: ${char.wbCharacteristicId || char.id}, тип: ${char.type}, ${char.isRequired ? 'обязательная' : 'опциональная'})`);
         if (char.values && char.values.length > 0) {
-          console.log(`     Варианты: ${char.values.slice(0, 3).map(v => v.value).join(', ')}${char.values.length > 3 ? '...' : ''}`);
+          console.log(`     Варианты: ${char.values.slice(0, 3).map((v: any) => v.value).join(', ')}${char.values.length > 3 ? '...' : ''}`);
         }
       });
       
@@ -532,7 +532,7 @@ export async function POST(request: NextRequest) {
         maxLength: char.maxLength,
         minValue: char.minValue,
         maxValue: char.maxValue,
-        values: (char.values || []).map(v => ({
+        values: (char.values || []).map((v: any) => ({
           id: v.wbValueId || v.id,
           value: v.value,
           displayName: v.displayName || v.value
