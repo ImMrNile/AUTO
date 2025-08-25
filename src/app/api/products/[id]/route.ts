@@ -128,7 +128,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     if (cabinets.length !== cabinetIds.length) {
       const foundIds = cabinets.map(c => c.id);
-      const missingIds = cabinetIds.filter(id => !foundIds.includes(id));
+      const missingIds = cabinetIds.filter((id: string) => !foundIds.includes(id));
       
       return NextResponse.json({
         success: false,
