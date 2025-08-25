@@ -1,0 +1,501 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  name          String?
+  avatarUrl     String?
+  role          UserRole   @default(USER)
+  isActive      Boolean    @default(true)
+  supabaseId    String     @unique
+  lastLoginAt   DateTime?
+  emailVerified DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  products      Product[]
+  cabinets      Cabinet[]
+  sessions      Session[]
+  apiKeys       ApiKey[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+  @@index([supabaseId])
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  key         String    @unique
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  isActive    Boolean   @default(true)
+  permissions Json
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([key])
+  @@map("api_keys")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Product {
+  id                  String               @id @default(cuid())
+  userId              String
+  name                String
+  price               Float
+  status              String               @default("PENDING")
+  originalImage       String?
+  referenceUrl        String?
+  dimensions          Json?
+  workflowId          String?
+  processingMethod    String?
+  gpt5Metrics         Json?
+  generatedName       String?
+  seoDescription      String?
+  colorAnalysis       String?
+  suggestedCategory   String?
+  aiCharacteristics   Json?
+  wbData              Json?
+  errorMessage        String?
+  publishedAt         DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  subcategoryId       Int?
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productCabinets     ProductCabinet[]
+  subcategory         WbSubcategory?       @relation(fields: [subcategoryId], references: [id])
+  agentWorkflows      AgentWorkflow[]
+  agentExecutions     AgentExecutionLog[]
+  gpt5SearchLogs      GPT5SearchLog[]
+  gpt5AnalysisResults GPT5AnalysisResult[]
+  infographics        ProductInfographic[]
+  infographicRequests InfographicRequest[]
+  publications        ProductPublication[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("products")
+}
+
+model Cabinet {
+  id              String               @id @default(cuid())
+  userId          String
+  name            String
+  description     String?
+  apiToken        String?
+  isActive        Boolean              @default(true)
+  sellerId        String?
+  shopName        String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productCabinets ProductCabinet[]
+  publications    ProductPublication[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("cabinets")
+}
+
+model ProductPublication {
+  id            String            @id @default(cuid())
+  productId     String
+  cabinetId     String
+  status        PublicationStatus @default(PENDING)
+  wbTaskId      String?
+  wbNmId        String?
+  wbImtId       String?
+  price         Float?
+  discountPrice Float?
+  publishedAt   DateTime?
+  errorMessage  String?
+  lastSyncAt    DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  product       Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  cabinet       Cabinet           @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, cabinetId])
+  @@index([productId])
+  @@index([cabinetId])
+  @@index([status])
+  @@map("product_publications")
+}
+
+model ProductCabinet {
+  id         String   @id @default(cuid())
+  productId  String
+  cabinetId  String
+  isSelected Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  cabinet    Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, cabinetId])
+  @@map("product_cabinets")
+}
+
+model WbParentCategory {
+  id            Int             @id @default(autoincrement())
+  name          String          @unique
+  slug          String          @unique
+  description   String?
+  isActive      Boolean         @default(true)
+  sortOrder     Int             @default(0)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  subcategories WbSubcategory[]
+
+  @@map("wb_parent_categories")
+}
+
+model WbSubcategory {
+  id                  Int                        @id @default(autoincrement())
+  wbSubjectId         Int?
+  name                String
+  slug                String                     @unique
+  parentCategoryId    Int
+  commissionFbw       Float                      @default(15.0)
+  commissionFbs       Float                      @default(15.0)
+  commissionDbs       Float                      @default(15.0)
+  commissionCc        Float                      @default(10.0)
+  commissionEdbs      Float                      @default(20.0)
+  commissionBooking   Float                      @default(10.0)
+  description         String?
+  keywords            Json?
+  isActive            Boolean                    @default(true)
+  sortOrder           Int                        @default(0)
+  minPrice            Float?
+  maxPrice            Float?
+  requiresCertificate Boolean                    @default(false)
+  ageRestriction      Int?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  parentCategory      WbParentCategory           @relation(fields: [parentCategoryId], references: [id], onDelete: Cascade)
+  characteristics     WbCategoryCharacteristic[]
+  products            Product[]
+
+  @@index([parentCategoryId])
+  @@map("wb_subcategories")
+}
+
+model WbCategoryCharacteristic {
+  id                 Int                     @id @default(autoincrement())
+  subcategoryId      Int
+  wbCharacteristicId Int?
+  name               String
+  type               String
+  isRequired         Boolean                 @default(false)
+  isMultiselect      Boolean                 @default(false)
+  maxLength          Int?
+  minValue           Float?
+  maxValue           Float?
+  pattern            String?
+  defaultValue       String?
+  description        String?
+  sortOrder          Int                     @default(0)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  subcategory        WbSubcategory           @relation(fields: [subcategoryId], references: [id], onDelete: Cascade)
+  values             WbCharacteristicValue[]
+
+  @@index([subcategoryId])
+  @@map("wb_category_characteristics")
+}
+
+model WbCharacteristicValue {
+  id               Int                      @id @default(autoincrement())
+  characteristicId Int
+  wbValueId        Int?
+  value            String
+  displayName      String?
+  sortOrder        Int                      @default(0)
+  isActive         Boolean                  @default(true)
+  createdAt        DateTime                 @default(now())
+  characteristic   WbCategoryCharacteristic @relation(fields: [characteristicId], references: [id], onDelete: Cascade)
+
+  @@index([characteristicId])
+  @@map("wb_characteristic_values")
+}
+
+model AgentWorkflow {
+  id                   String    @id @default(cuid())
+  workflowId           String    @unique
+  productId            String?
+  systemType           String
+  status               String
+  currentStage         String
+  stageData            Json?
+  startedAt            DateTime
+  completedAt          DateTime?
+  totalDuration        Int?
+  apiCallsCount        Int       @default(0)
+  tokensUsed           Int       @default(0)
+  agent1Result         Json?
+  agent2Result         Json?
+  agent3Result         Json?
+  finalResult          Json?
+  overallConfidence    Float?
+  qualityScore         Int?
+  characteristicsCount Int?
+  searchResultsCount   Int?
+  errorMessage         String?
+  warnings             Json?
+  retryCount           Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  product              Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([workflowId])
+  @@map("agent_workflows")
+}
+
+model AgentExecutionLog {
+  id                       String    @id @default(cuid())
+  workflowId               String
+  productId                String?
+  agentName                String
+  taskId                   String
+  status                   String
+  startedAt                DateTime
+  completedAt              DateTime?
+  duration                 Int?
+  inputData                Json?
+  apiCalls                 Int       @default(0)
+  tokensUsed               Int       @default(0)
+  retryCount               Int       @default(0)
+  maxMemoryUsed            Int?
+  searchCallsUsed          Int?
+  success                  Boolean   @default(false)
+  result                   Json?
+  confidence               Float?
+  errorMessage             String?
+  errorCode                String?
+  imageCount               Int?
+  characteristicsGenerated Int?
+  validationErrors         Int?
+  searchResultsFound       Int?
+  sourcesValidated         Int?
+  createdAt                DateTime  @default(now())
+  product                  Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([workflowId, agentName])
+  @@index([productId])
+  @@index([createdAt])
+  @@index([status, agentName])
+  @@map("agent_execution_logs")
+}
+
+model GPT5SearchLog {
+  id                String   @id @default(cuid())
+  productId         String
+  workflowId        String
+  agentType         String
+  searchQuery       String
+  searchType        String
+  searchResults     Json
+  sourcesFound      Int      @default(0)
+  relevantSources   Int      @default(0)
+  dataExtracted     Json?
+  searchConfidence  Float?
+  sourceReliability Float?
+  dataCompleteness  Float?
+  searchDuration    Int?
+  apiCallsUsed      Int      @default(0)
+  tokensUsed        Int      @default(0)
+  createdAt         DateTime @default(now())
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([workflowId])
+  @@index([searchType])
+  @@index([createdAt])
+  @@map("gpt5_search_logs")
+}
+
+model GPT5AnalysisResult {
+  id                      String   @id @default(cuid())
+  productId               String
+  workflowId              String
+  agent1Data              Json
+  agent2Data              Json
+  agent3Data              Json
+  totalCharacteristics    Int      @default(0)
+  filledCharacteristics   Int      @default(0)
+  fillPercentage          Float?
+  overallConfidence       Float?
+  searchQueriesCount      Int      @default(0)
+  uniqueSourcesFound      Int      @default(0)
+  highQualitySourcesCount Int      @default(0)
+  totalProcessingTime     Int?
+  agent1ProcessingTime    Int?
+  agent2ProcessingTime    Int?
+  agent3ProcessingTime    Int?
+  totalTokensUsed         Int      @default(0)
+  totalApiCalls           Int      @default(0)
+  estimatedCost           Float?
+  validationErrors        Json?
+  dataQualityScore        Int?
+  readyForPublication     Boolean  @default(false)
+  comparedToOptimized     Json?
+  comparedToLegacy        Json?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  product                 Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([workflowId])
+  @@index([fillPercentage])
+  @@index([dataQualityScore])
+  @@index([createdAt])
+  @@map("gpt5_analysis_results")
+}
+
+model ProductInfographic {
+  id                 String              @id @default(cuid())
+  productId          String
+  infographicType    String
+  imageUrl           String
+  thumbnailUrl       String?
+  sourceProductImage String
+  informationFocus   String
+  qualityMetrics     Json
+  generationPrompt   String
+  brandColors        Json?
+  iterationsCount    Int                 @default(1)
+  width              Int                 @default(900)
+  height             Int                 @default(1200)
+  fileSize           Int?
+  mimeType           String              @default("image/png")
+  status             String              @default("ACTIVE")
+  isApproved         Boolean             @default(false)
+  approvedAt         DateTime?
+  approvedBy         String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  requestId          String?
+  product            Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  request            InfographicRequest? @relation(fields: [requestId], references: [id])
+
+  @@index([productId])
+  @@index([status])
+  @@index([infographicType])
+  @@map("product_infographics")
+}
+
+model InfographicRequest {
+  id                 String               @id @default(cuid())
+  productId          String
+  status             String
+  additionalImages   Json
+  competitorRefs     Json?
+  competitorUrls     Json?
+  brandColors        Json?
+  customInstructions String?
+  totalInfographics  Int                  @default(0)
+  successfulCount    Int                  @default(0)
+  failedCount        Int                  @default(0)
+  processingTime     Int?
+  averageQuality     Float?
+  totalCost          Float?
+  agentLogs          Json?
+  errorMessage       String?
+  errorCode          String?
+  startedAt          DateTime             @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  product            Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  infographics       ProductInfographic[]
+
+  @@index([productId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("infographic_requests")
+}
+
+model WbApiCache {
+  id        Int      @id @default(autoincrement())
+  cacheKey  String   @unique
+  data      Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("wb_api_cache")
+}
+
+model WbCategorySyncLog {
+  id               Int       @id @default(autoincrement())
+  syncType         String
+  status           String
+  recordsProcessed Int       @default(0)
+  recordsUpdated   Int       @default(0)
+  recordsCreated   Int       @default(0)
+  errorMessage     String?
+  startedAt        DateTime  @default(now())
+  completedAt      DateTime?
+
+  @@map("wb_category_sync_logs")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum PublicationStatus {
+  PENDING
+  QUEUED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  UNPUBLISHED
+}

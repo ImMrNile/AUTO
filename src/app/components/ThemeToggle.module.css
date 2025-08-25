@@ -1,0 +1,37 @@
+.toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    transition: background .2s ease, transform .06s ease;
+}
+
+.toggle:hover {
+    background: rgba(148, 163, 184, .12);
+}
+
+.toggle:active {
+    transform: translateY(1px);
+}
+
+.icon {
+    display: inline-flex;
+    color: var(--accent);
+}
+
+.label {
+    font-weight: 700;
+    font-size: 14px;
+}
+
+@media (max-width: 640px) {
+    .label {
+        font-size: 13px;
+    }
+}
