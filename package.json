@@ -1,0 +1,45 @@
+{
+    "name": "wb-product-automation",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "next lint",
+        "db:generate": "prisma generate",
+        "db:push": "prisma db push",
+        "db:studio": "prisma studio"
+    },
+    "dependencies": {
+        "@prisma/client": "^5.15.0",
+        "@types/bcryptjs": "^2.4.6",
+        "@types/node": "^20",
+        "@types/react": "^18",
+        "type": "module",
+        "@types/react-dom": "^18",
+        "autoprefixer": "^10.0.1",
+        "axios": "^1.7.2",
+        "bcryptjs": "^2.4.3",
+        "jose": "^5.4.1",
+        "lucide-react": "^0.400.0",
+        "next": "14.2.5",
+        "openai": "^4.52.7",
+        "playwright": "^1.54.1",
+        "postcss": "^8",
+        "prisma": "^5.15.0",
+        "puppeteer": "^24.14.0",
+        "react": "^18",
+        "react-dom": "^18",
+        "react-dropzone": "^14.2.3",
+        "react-hook-form": "^7.52.1",
+        "sharp": "^0.33.4",
+        "tailwindcss": "^3.4.1",
+        "typescript": "^5",
+        "zod": "^3.23.8"
+    },
+    "devDependencies": {
+        "eslint": "^8",
+        "eslint-config-next": "14.2.5"
+    }
+}
