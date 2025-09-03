@@ -2,6 +2,8 @@
 
 import { prisma } from '../prisma'
 import { cookies } from 'next/headers'
+import { withPrismaRetry } from '../utils/retry'
+import { sessionCache } from './session-cache'
 
 export interface AuthUser {
   id: string
@@ -29,27 +31,36 @@ export class AuthService {
         return null
       }
 
+      // Проверяем кеш сначала
+      const cachedUser = sessionCache.get(token);
+      if (cachedUser) {
+        console.log('⚡ [AuthService] Пользователь найден в кеше:', cachedUser.email);
+        return cachedUser;
+      }
+
       // Подключаемся к БД и ищем сессию
       console.log('🔍 [AuthService] Connecting to Supabase PostgreSQL...')
       
-      // Обеспечиваем соединение с БД
-      await prisma.$connect()
+      // Prisma уже подключен как singleton, просто проверяем готовность
+      console.log('✅ [AuthService] Using existing Prisma connection')
       
-      const session = await prisma.session.findUnique({
-        where: { token },
-        include: { 
-          user: {
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              avatarUrl: true,
-              role: true,
-              isActive: true
+      const session = await withPrismaRetry(async () => {
+        return await prisma.session.findUnique({
+          where: { token },
+          include: { 
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                avatarUrl: true,
+                role: true,
+                isActive: true
+              }
             }
           }
-        }
-      })
+        });
+      }, 'getCurrentUser - find session')
 
       console.log('🔍 [AuthService] Session search result:', session ? {
         sessionId: session.id,
@@ -84,14 +95,19 @@ export class AuthService {
 
       console.log('✅ [AuthService] User authenticated successfully:', session.user.email)
       
-      return {
+      const user = {
         id: session.user.id,
         email: session.user.email,
         name: session.user.name || undefined,
         avatarUrl: session.user.avatarUrl || undefined,
         role: session.user.role,
         isActive: session.user.isActive
-      }
+      };
+
+      // Сохраняем в кеш
+      sessionCache.set(token, user, session.expiresAt);
+      
+      return user
 
     } catch (error) {
       console.error('❌ [AuthService] Database error:', error)
@@ -108,8 +124,6 @@ export class AuthService {
       }
       
       throw error // Пробрасываем ошибку выше для обработки
-    } finally {
-      await prisma.$disconnect()
     }
   }
 
@@ -120,8 +134,6 @@ export class AuthService {
     console.log('🔐 [AuthService] Creating session for user:', userId)
     
     try {
-      await prisma.$connect()
-      
       const token = this.generateToken()
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 дней
 
@@ -141,8 +153,6 @@ export class AuthService {
     } catch (error) {
       console.error('❌ [AuthService] Error creating session:', error)
       throw error
-    } finally {
-      await prisma.$disconnect()
     }
   }
 
@@ -153,8 +163,6 @@ export class AuthService {
     console.log('🔍 [AuthService] Validating session:', token.substring(0, 10) + '...')
     
     try {
-      await prisma.$connect()
-      
       const session = await prisma.session.findUnique({
         where: { token },
         include: { 
@@ -192,8 +200,6 @@ export class AuthService {
     } catch (error) {
       console.error('❌ [AuthService] Error validating session:', error)
       throw error
-    } finally {
-      await prisma.$disconnect()
     }
   }
 
@@ -204,16 +210,16 @@ export class AuthService {
     console.log('🔐 [AuthService] Destroying session:', token.substring(0, 10) + '...')
     
     try {
-      await prisma.$connect()
-      
       await prisma.session.delete({ where: { token } })
+      
+      // Удаляем из кеша
+      sessionCache.delete(token);
+      
       console.log('✅ [AuthService] Session deleted successfully')
       
     } catch (error) {
       console.error('❌ [AuthService] Error destroying session:', error)
       throw error
-    } finally {
-      await prisma.$disconnect()
     }
   }
 
@@ -224,8 +230,6 @@ export class AuthService {
     console.log('🔐 [AuthService] Destroying all sessions for user:', userId)
     
     try {
-      await prisma.$connect()
-      
       const result = await prisma.session.deleteMany({ 
         where: { userId } 
       })
@@ -235,8 +239,6 @@ export class AuthService {
     } catch (error) {
       console.error('❌ [AuthService] Error destroying user sessions:', error)
       throw error
-    } finally {
-      await prisma.$disconnect()
     }
   }
 
@@ -275,8 +277,6 @@ export class AuthService {
     console.log('🧹 [AuthService] Cleaning up expired sessions...')
     
     try {
-      await prisma.$connect()
-      
       const result = await prisma.session.deleteMany({
         where: {
           expiresAt: {
@@ -291,8 +291,6 @@ export class AuthService {
     } catch (error) {
       console.error('❌ [AuthService] Error cleaning up sessions:', error)
       throw error
-    } finally {
-      await prisma.$disconnect()
     }
   }
 
@@ -306,8 +304,6 @@ export class AuthService {
     uniqueUsers: number;
   }> {
     try {
-      await prisma.$connect()
-      
       const now = new Date()
       
       const [
@@ -339,8 +335,6 @@ export class AuthService {
     } catch (error) {
       console.error('❌ [AuthService] Error getting session stats:', error)
       throw error
-    } finally {
-      await prisma.$disconnect()
     }
   }
 
@@ -377,8 +371,6 @@ export class AuthService {
    */
   static async updateLastLogin(userId: string): Promise<void> {
     try {
-      await prisma.$connect()
-      
       await prisma.user.update({
         where: { id: userId },
         data: { lastLoginAt: new Date() }
@@ -389,8 +381,6 @@ export class AuthService {
     } catch (error) {
       console.error('❌ [AuthService] Error updating last login:', error)
       // Не пробрасываем ошибку, так как это не критично
-    } finally {
-      await prisma.$disconnect()
     }
   }
 }

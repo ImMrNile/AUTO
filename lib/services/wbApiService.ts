@@ -189,9 +189,12 @@ export class WbApiService {
   }
 
   /**
-   * Универсальный метод для запросов к WB API
+   * Универсальный метод для запросов к WB API с улучшенной обработкой таймаутов и повторными попытками
    */
-  private async makeRequest(endpoint: string, apiToken: string, options: RequestInit = {}): Promise<any> {
+  private async makeRequest(endpoint: string, apiToken: string, options: RequestInit = {}, retryCount: number = 0): Promise<any> {
+    const maxRetries = 3;
+    const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 10000); // Экспоненциальная задержка, максимум 10 секунд
+    
     if (!this.validateToken(apiToken)) {
       throw new Error('Недействительный токен API. Проверьте формат и срок действия.');
     }
@@ -203,14 +206,19 @@ export class WbApiService {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'User-Agent': 'WB-AI-Assistant/2.0',
+      'Connection': 'keep-alive',
       ...options.headers,
     };
 
-    console.log(`🌐 Отправляем запрос в WB API: ${url}`);
+    console.log(`🌐 Отправляем запрос в WB API (попытка ${retryCount + 1}/${maxRetries + 1}): ${url}`);
     
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT);
+      // Увеличиваем таймаут для создания карточек до 60 секунд
+      const timeout = endpoint.includes('cards/upload') ? 60000 : this.TIMEOUT;
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      console.log(`⏱️ Установлен таймаут: ${timeout}мс для endpoint: ${endpoint}`);
 
       const response = await fetch(url, {
         ...options,
@@ -237,24 +245,77 @@ export class WbApiService {
           errorData = { message: responseText || 'Пустой ответ от сервера' };
         }
         
+        // Проверяем, стоит ли повторить запрос
+        const shouldRetry = this.shouldRetryRequest(response.status, errorData);
+        if (shouldRetry && retryCount < maxRetries) {
+          console.log(`🔄 Повторяем запрос через ${retryDelay}мс...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          return this.makeRequest(endpoint, apiToken, options, retryCount + 1);
+        }
+        
         // Детальная обработка ошибок
         const formattedError = this.formatWBApiError(response.status, errorData, responseText);
         throw new Error(formattedError);
       }
 
       const data = await response.json();
-      console.log('✅ Успешный ответ от WB API');
+      console.log(`✅ Успешный ответ от WB API (попытка ${retryCount + 1})`);
       return data;
 
     } catch (error) {
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
-          throw new Error('Превышено время ожидания ответа от WB API');
+          const timeoutError = new Error(`Превышено время ожидания ответа от WB API (${endpoint.includes('cards/upload') ? '60' : '30'} секунд)`);
+          
+          // Повторяем при таймауте, если есть попытки
+          if (retryCount < maxRetries) {
+            console.log(`🔄 Таймаут, повторяем запрос через ${retryDelay}мс...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            return this.makeRequest(endpoint, apiToken, options, retryCount + 1);
+          }
+          
+          throw timeoutError;
         }
+        
+        // Проверяем сетевые ошибки для повтора
+        const isNetworkError = error.message.includes('fetch failed') || 
+                              error.message.includes('ENOTFOUND') ||
+                              error.message.includes('ECONNREFUSED') ||
+                              error.message.includes('ECONNRESET');
+        
+        if (isNetworkError && retryCount < maxRetries) {
+          console.log(`🔄 Сетевая ошибка, повторяем запрос через ${retryDelay}мс...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          return this.makeRequest(endpoint, apiToken, options, retryCount + 1);
+        }
+        
         throw error;
       }
       throw new Error('Неизвестная ошибка при запросе к WB API');
     }
+  }
+
+  /**
+   * Определяет, стоит ли повторить запрос при определенном статусе ошибки
+   */
+  private shouldRetryRequest(status: number, errorData: any): boolean {
+    // Повторяем при серверных ошибках и ошибках сети
+    if (status >= 500 && status < 600) {
+      return true;
+    }
+    
+    // Повторяем при ошибке 429 (превышен лимит запросов)
+    if (status === 429) {
+      return true;
+    }
+    
+    // Повторяем при ошибке 408 (таймаут запроса)
+    if (status === 408) {
+      return true;
+    }
+    
+    // Не повторяем клиентские ошибки (400, 401, 403, 404, etc.)
+    return false;
   }
 
   /**

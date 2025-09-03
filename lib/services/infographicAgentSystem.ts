@@ -217,8 +217,8 @@ class PromptCreationAgent {
     const response = await this.openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-      max_tokens: 3000,
+      temperature: 0.2,
+      max_completion_tokens: 3000,
       response_format: { type: "json_object" }
     });
 
