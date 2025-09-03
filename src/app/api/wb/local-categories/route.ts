@@ -1,9 +1,7 @@
 // src/app/api/wb/local-categories/route.ts - ПОЛНЫЙ API ENDPOINT
 
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../../../../lib/prisma';
 
 // CORS заголовки
 const corsHeaders = {

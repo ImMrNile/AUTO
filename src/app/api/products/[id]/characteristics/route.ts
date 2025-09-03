@@ -1,564 +1,55 @@
-// src/app/api/products/[id]/characteristics/route.ts - ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ
+// src/app/api/products/[id]/characteristics/route.ts - ПОЛНАЯ ВЕРСИЯ
 
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma, safePrismaOperation } from '../../../../../../lib/prisma';
+import { AuthService } from '../../../../../../lib/auth/auth-service';
 
-const prisma = new PrismaClient();
-
-/**
- * УЛУЧШЕННАЯ функция обработки значений характеристик
- */
-function processCharacteristicValue(
-  value: any,
-  characteristicName: string,
-  characteristicId: number,
-  dbType: 'string' | 'number'
-): any {
-  if (value === null || value === undefined || value === '') {
-    return null;
-  }
-
-  const nameLower = characteristicName.toLowerCase();
-  console.log(`🔧 Обработка: "${characteristicName}" (ID: ${characteristicId}, тип: ${dbType}) = "${value}"`);
-
-  // ПРЕДВАРИТЕЛЬНЫЕ ИСПРАВЛЕНИЯ РАСПРОСТРАНЕННЫХ ПРОБЛЕМ
-  let correctedValue = fixCommonIssues(characteristicName, value);
-
-  if (dbType === 'number') {
-    // Для числовых характеристик - извлекаем чистое число
-    return extractPureNumber(correctedValue, characteristicName);
-  } else {
-    // Для строковых характеристик - добавляем единицы если нужно
-    return processStringWithUnits(correctedValue, nameLower, characteristicId);
-  }
-}
-
-/**
- * Исправление распространенных проблем
- */
-function fixCommonIssues(characteristicName: string, value: any): any {
-  const nameLower = characteristicName.toLowerCase();
-  
-  console.log(`🔧 Проверка проблем для "${characteristicName}": "${value}"`);
-  
-  // ИСПРАВЛЕНИЕ: "2 минуты" для времени зарядки -> "120 минут"
-  if (nameLower.includes('время зарядки')) {
-    if (value === '2 минуты' || value === '2' || value === 2) {
-      console.log(`🔧 ИСПРАВЛЕНО время зарядки: "${value}" → "120 минут"`);
-      return '120 минут';
-    }
-    if (value === '1' || value === 1) {
-      console.log(`🔧 ИСПРАВЛЕНО время зарядки: "${value}" → "60 минут"`);
-      return '60 минут';
-    }
-  }
-
-  // ИСПРАВЛЕНИЕ: Радиус действия "10" -> "10 м"
-  if (nameLower.includes('радиус') || nameLower.includes('дальность') || 
-      nameLower.includes('расстояние')) {
-    if (value === '10' || value === 10) {
-      console.log(`🔧 ИСПРАВЛЕНО радиус: "${value}" → "10 м"`);
-      return '10 м';
-    }
-    if (typeof value === 'number' && value < 100) {
-      console.log(`🔧 ИСПРАВЛЕНО радиус: "${value}" → "${value} м"`);
-      return `${value} м`;
-    }
-  }
-
-  // ИСПРАВЛЕНИЕ: Длина кабеля "0.3 см" -> "30 см" 
-  if (nameLower.includes('длина') && nameLower.includes('кабел')) {
-    if (value === '0.3 см' || value === '0.3') {
-      console.log(`🔧 ИСПРАВЛЕНА длина кабеля: "${value}" → "30 см"`);
-      return '30 см';
-    }
-  }
-
-  return value;
-}
-
-/**
- * Извлечение чистого числа для числовых характеристик
- */
-function extractPureNumber(value: any, charName: string): number | null {
-  if (typeof value === 'number') {
-    console.log(`🔢 Число как есть: ${value}`);
-    return value;
-  }
-
-  if (typeof value === 'string') {
-    // Удаляем все пробелы и заменяем запятые на точки
-    const cleaned = value.replace(/\s+/g, '').replace(/,/g, '.');
-    
-    // Ищем первое число в строке
-    const match = cleaned.match(/(\d+(?:\.\d+)?)/);
-    if (match) {
-      const num = parseFloat(match[1]);
-      console.log(`🔢 Извлечено число из "${value}": ${num}`);
-      return isNaN(num) ? null : num;
-    }
-  }
-
-  console.warn(`⚠️ Не удалось извлечь число из "${value}" для ${charName}`);
-  return null;
-}
-
-/**
- * Обработка строковых характеристик с добавлением единиц
- */
-function processStringWithUnits(
-  value: any,
-  nameLower: string,
-  characteristicId: number
-): string {
-  let stringValue = String(value).trim();
-
-  // Проверяем, нужны ли единицы для этой характеристики
-  if (!needsUnits(nameLower)) {
-    console.log(`📝 Обычная строка: "${stringValue}"`);
-    return stringValue;
-  }
-
-  // Проверяем, есть ли уже единицы
-  if (hasUnitsAlready(stringValue)) {
-    console.log(`✅ Единицы уже есть: "${stringValue}"`);
-    return stringValue;
-  }
-
-  // Извлекаем число для добавления правильных единиц
-  const numMatch = stringValue.match(/(\d+(?:\.\d+)?)/);
-  if (!numMatch) {
-    console.log(`📝 Текст без числа: "${stringValue}"`);
-    return stringValue;
-  }
-
-  const number = parseFloat(numMatch[1]);
-  const processedValue = addAppropriateUnits(number, nameLower, stringValue);
-  
-  console.log(`🔧 Добавлены единицы: "${stringValue}" → "${processedValue}"`);
-  return processedValue;
-}
-
-/**
- * Проверка нужны ли единицы измерения
- */
-function needsUnits(nameLower: string): boolean {
-  const unitsKeywords = [
-    'время', 'срок', 'период', 'длительность',
-    'емкость', 'гарантия',
-    'радиус', 'дальность', 'расстояние', 'дистанция'
-  ];
-
-  return unitsKeywords.some(keyword => nameLower.includes(keyword));
-}
-
-/**
- * Проверка наличия единиц измерения в строке
- */
-function hasUnitsAlready(value: string): boolean {
-  const unitsPatterns = [
-    // Время
-    /\d+\s*(час|часов|мин|минут|сек|секунд|ч|м|с)\b/i,
-    /\d+\s*(год|года|лет|месяц|месяцев|недель|дней)\b/i,
-    
-    // Размеры
-    /\d+\s*(см|мм|м|дм|км|mm|cm)\b/i,
-    /\d+\s*(дюйм|"|inch|инч)\b/i,
-    
-    // Емкость и прочее
-    /\d+\s*(мач|mah|мa·ч|ma·h|ач|ah)\b/i,
-    /\d+\s*(вт|ватт|w|квт)\b/i,
-    /\d+\s*(в|вольт|v|кв)\b/i,
-    /\d+\s*(гц|герц|hz|мгц|кгц|ghz|khz)\b/i,
-    /\d+\s*(дб|db|децибел)\b/i,
-  ];
-
-  return unitsPatterns.some(pattern => pattern.test(value));
-}
-
-/**
- * Добавление подходящих единиц измерения
- */
-function addAppropriateUnits(
-  number: number,
-  nameLower: string,
-  originalValue: string
-): string {
-  console.log(`🔧 Добавляем единицы для "${originalValue}" (число: ${number})`);
-
-  // ВРЕМЯ ЗАРЯДКИ - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ
-  if (nameLower.includes('время зарядки') || nameLower.includes('зарядк')) {
-    if (number <= 10) {
-      // 1-10 скорее всего часы
-      return `${number} ${getHoursForm(number)}`;
-    } else if (number <= 600) {
-      // 10-600 скорее всего минуты
-      return `${number} ${getMinutesForm(number)}`;
-    } else {
-      // Больше 600 - возможно секунды, переводим в минуты
-      const minutes = Math.round(number / 60);
-      return `${minutes} ${getMinutesForm(minutes)}`;
-    }
-  }
-
-  // ВРЕМЯ РАБОТЫ ОТ АККУМУЛЯТОРА
-  if (nameLower.includes('время работы') || nameLower.includes('автономность')) {
-    if (number <= 48) {
-      // До 48 - оставляем в часах
-      return `${number} ${getHoursForm(number)}`;
-    } else if (number <= 2880) {
-      // До 2880 минут (48 часов) - переводим в часы
-      const hours = Math.round(number / 60);
-      return `${hours} ${getHoursForm(hours)}`;
-    } else {
-      // Больше - возможно секунды, переводим в часы
-      const hours = Math.round(number / 3600);
-      return `${hours} ${getHoursForm(hours)}`;
-    }
-  }
-
-  // РАДИУС ДЕЙСТВИЯ / ДАЛЬНОСТЬ - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ
-  if (nameLower.includes('радиус') || nameLower.includes('дальность') || 
-      nameLower.includes('расстояние') || nameLower.includes('дистанция')) {
-    if (number <= 100) {
-      // До 100 - скорее всего метры
-      return `${number} м`;
-    } else if (number <= 10000) {
-      // До 10000 - скорее всего сантиметры, переводим в метры
-      const meters = Math.round(number / 100);
-      return `${meters} м`;
-    } else {
-      // Больше 10000 - возможно миллиметры, переводим в метры
-      const meters = Math.round(number / 1000);
-      return `${meters} м`;
-    }
-  }
-
-  // ЕМКОСТЬ АККУМУЛЯТОРА
-  if (nameLower.includes('емкость')) {
-    if (originalValue.toLowerCase().includes('не указано') || 
-        originalValue.toLowerCase().includes('нет')) {
-      return "не указано";
-    }
-    if (number >= 100) {
-      return `${number} мАч`;
-    } else {
-      // Возможно в Ач, переводим в мАч
-      return `${number * 1000} мАч`;
-    }
-  }
-
-  // ГАРАНТИЙНЫЙ СРОК
-  if (nameLower.includes('гарантия') || nameLower.includes('срок')) {
-    if (number >= 12) {
-      const years = Math.round(number / 12);
-      return `${years} ${getYearsForm(years)}`;
-    } else {
-      return `${number} ${getMonthsForm(number)}`;
-    }
-  }
-
-  // ПО УМОЛЧАНИЮ - возвращаем исходное значение
-  console.log(`⚠️ Неизвестный тип характеристики: "${nameLower}"`);
-  return originalValue;
-}
-
-/**
- * Склонения для времени
- */
-function getHoursForm(hours: number): string {
-  const lastDigit = hours % 10;
-  const lastTwoDigits = hours % 100;
-  
-  if (lastTwoDigits >= 11 && lastTwoDigits <= 14) return 'часов';
-  if (lastDigit === 1) return 'час';
-  if (lastDigit >= 2 && lastDigit <= 4) return 'часа';
-  return 'часов';
-}
-
-function getMinutesForm(minutes: number): string {
-  const lastDigit = minutes % 10;
-  const lastTwoDigits = minutes % 100;
-  
-  if (lastTwoDigits >= 11 && lastTwoDigits <= 14) return 'минут';
-  if (lastDigit === 1) return 'минуту';
-  if (lastDigit >= 2 && lastDigit <= 4) return 'минуты';
-  return 'минут';
-}
-
-function getYearsForm(years: number): string {
-  const lastDigit = years % 10;
-  const lastTwoDigits = years % 100;
-  
-  if (lastTwoDigits >= 11 && lastTwoDigits <= 14) return 'лет';
-  if (lastDigit === 1) return 'год';
-  if (lastDigit >= 2 && lastDigit <= 4) return 'года';
-  return 'лет';
-}
-
-function getMonthsForm(months: number): string {
-  const lastDigit = months % 10;
-  const lastTwoDigits = months % 100;
-  
-  if (lastTwoDigits >= 11 && lastTwoDigits <= 14) return 'месяцев';
-  if (lastDigit === 1) return 'месяц';
-  if (lastDigit >= 2 && lastDigit <= 4) return 'месяца';
-  return 'месяцев';
-}
-
-// PUT - обновление/добавление характеристики товара
-export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const productId = params.id;
-    const { characteristicId, value, action = 'update' } = await request.json();
-
-    console.log(`🔧 ${action === 'add' ? 'Добавление' : 'Обновление'} характеристики ${characteristicId} для товара ${productId}`);
-
-    // Находим продукт
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
-      include: {
-        subcategory: true
-      }
-    });
-
-    if (!product) {
-      return NextResponse.json({
-        success: false,
-        error: 'Товар не найден'
-      }, { status: 404 });
-    }
-
-    // Получаем характеристики категории для валидации
-    let categoryCharacteristics = [];
-    if (product.subcategory) {
-      try {
-        const categoryResponse = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/categories/${product.subcategory.id}/characteristics`);
-        if (categoryResponse.ok) {
-          const categoryData = await categoryResponse.json();
-          categoryCharacteristics = categoryData.characteristics || [];
-        }
-      } catch (error) {
-        console.warn('⚠️ Не удалось загрузить характеристики категории:', error);
-      }
-    }
-
-    // Находим информацию о характеристике в категории
-    const categoryChar = categoryCharacteristics.find((c: any) => c.id === characteristicId);
-    
-    // Парсим существующие характеристики
-    let aiData: any = { characteristics: [] };
-    if (product.aiCharacteristics) {
-      try {
-        // ИСПРАВЛЕНИЕ: правильная обработка JSON из Prisma
-        const aiCharacteristicsValue = product.aiCharacteristics;
-        if (typeof aiCharacteristicsValue === 'string') {
-          aiData = JSON.parse(aiCharacteristicsValue);
-        } else if (aiCharacteristicsValue && typeof aiCharacteristicsValue === 'object') {
-          aiData = aiCharacteristicsValue;
-        }
-        
-        if (!aiData.characteristics) {
-          aiData.characteristics = [];
-        }
-      } catch (error) {
-        console.error('❌ Ошибка парсинга aiCharacteristics:', error);
-        aiData = { characteristics: [] };
-      }
-    }
-
-    // ОБРАБОТКА С УЛУЧШЕННОЙ ЛОГИКОЙ
-    let characteristicType = 'string';
-    if (categoryChar) {
-      characteristicType = categoryChar.type;
-    }
-
-    // Используем улучшенную функцию обработки
-    const processedValue = processCharacteristicValue(
-      value,
-      categoryChar?.name || `Характеристика ${characteristicId}`,
-      characteristicId,
-      characteristicType as 'string' | 'number'
-    );
-
-    if (processedValue === null || processedValue === undefined) {
-      return NextResponse.json({
-        success: false,
-        error: `Не удалось обработать значение "${value}" для характеристики`
-      }, { status: 400 });
-    }
-
-    // Обновляем или добавляем характеристику
-    const characteristicIndex = aiData.characteristics.findIndex(
-      (char: any) => char.id === characteristicId
-    );
-
-    const characteristicData = {
-      id: characteristicId,
-      name: categoryChar?.name || `Характеристика ${characteristicId}`,
-      value: processedValue,
-      type: characteristicType,
-      confidence: 1.0, // Пользователь уверен на 100%
-      reasoning: action === 'add' ? 'Добавлено пользователем' : 'Отредактировано пользователем'
-    };
-
-    if (characteristicIndex !== -1) {
-      // Обновляем существующую характеристику
-      aiData.characteristics[characteristicIndex] = characteristicData;
-      console.log(`✅ Обновлена характеристика ${characteristicId}: "${processedValue}"`);
-    } else {
-      // Добавляем новую характеристику
-      aiData.characteristics.push(characteristicData);
-      console.log(`➕ Добавлена характеристика ${characteristicId}: "${processedValue}"`);
-    }
-
-    // Сохраняем обновленные данные
-    await prisma.product.update({
-      where: { id: productId },
-      data: {
-        aiCharacteristics: JSON.stringify(aiData),
-        updatedAt: new Date()
-      }
-    });
-
-    console.log(`✅ Характеристика ${characteristicId} успешно ${action === 'add' ? 'добавлена' : 'обновлена'}`);
-
-    return NextResponse.json({
-      success: true,
-      message: `Характеристика ${action === 'add' ? 'добавлена' : 'обновлена'}`,
-      characteristic: characteristicData
-    });
-
-  } catch (error) {
-    console.error('❌ Ошибка обновления характеристики:', error);
-    return NextResponse.json({
-      success: false,
-      error: 'Внутренняя ошибка сервера',
-      details: error instanceof Error ? error.message : 'Неизвестная ошибка'
-    }, { status: 500 });
-  }
-}
-
-// DELETE - удаление характеристики (РАЗРЕШЕНО для пользовательского редактирования)
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const productId = params.id;
-    const { searchParams } = new URL(request.url);
-    const characteristicId = parseInt(searchParams.get('characteristicId') || '0');
-
-    console.log(`🗑️ Удаление характеристики ${characteristicId} для товара ${productId}`);
-
-    // Находим продукт
-    const product = await prisma.product.findUnique({
-      where: { id: productId }
-    });
-
-    if (!product) {
-      return NextResponse.json({
-        success: false,
-        error: 'Товар не найден'
-      }, { status: 404 });
-    }
-
-    // Парсим существующие характеристики
-    let aiData: any = { characteristics: [] };
-    if (product.aiCharacteristics) {
-      try {
-        // ИСПРАВЛЕНИЕ: правильная обработка JSON из Prisma
-        const aiCharacteristicsValue = product.aiCharacteristics;
-        if (typeof aiCharacteristicsValue === 'string') {
-          aiData = JSON.parse(aiCharacteristicsValue);
-        } else if (aiCharacteristicsValue && typeof aiCharacteristicsValue === 'object') {
-          aiData = aiCharacteristicsValue;
-        }
-      } catch (error) {
-        console.error('❌ Ошибка парсинга aiCharacteristics:', error);
-        return NextResponse.json({
-          success: false,
-          error: 'Ошибка данных товара'
-        }, { status: 400 });
-      }
-    }
-
-    // Удаляем характеристику (пользователь может удалять любые характеристики)
-    if (aiData.characteristics && Array.isArray(aiData.characteristics)) {
-      const initialLength = aiData.characteristics.length;
-      aiData.characteristics = aiData.characteristics.filter(
-        (char: any) => char.id !== characteristicId
-      );
-
-      if (aiData.characteristics.length === initialLength) {
-        return NextResponse.json({
-          success: false,
-          error: 'Характеристика не найдена'
-        }, { status: 404 });
-      }
-    }
-
-    // Сохраняем обновленные данные
-    await prisma.product.update({
-      where: { id: productId },
-      data: {
-        aiCharacteristics: JSON.stringify(aiData),
-        updatedAt: new Date()
-      }
-    });
-
-    console.log(`✅ Характеристика ${characteristicId} успешно удалена пользователем`);
-
-    return NextResponse.json({
-      success: true,
-      message: 'Характеристика удалена'
-    });
-
-  } catch (error) {
-    console.error('❌ Ошибка удаления характеристики:', error);
-    return NextResponse.json({
-      success: false,
-      error: 'Внутренняя ошибка сервера'
-    }, { status: 500 });
-  }
-}
-
-// GET - получение ВСЕХ характеристик товара (заполненных + незаполненных)
+// GET метод - получение характеристик товара с правильным парсингом AI данных
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const productId = params.id;
+    console.log(`📋 [API] Получение характеристик товара: ${params.id}`);
 
-    console.log(`📋 Получение полных характеристик товара: ${productId}`);
+    const user = await AuthService.getCurrentUser();
+    if (!user) {
+      return NextResponse.json({
+        success: false,
+        error: 'Не авторизован'
+      }, { status: 401 });
+    }
 
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
-      include: {
-        subcategory: {
-          include: {
-            parentCategory: true,
-            characteristics: {
-              include: {
-                values: {
-                  where: { isActive: true },
-                  orderBy: { sortOrder: 'asc' }
-                }
-              },
-              orderBy: [
-                { isRequired: 'desc' },
-                { sortOrder: 'asc' },
-                { name: 'asc' }
-              ]
+    // Получение товара с полной информацией
+    const product = await safePrismaOperation(
+      () => prisma.product.findFirst({
+        where: {
+          id: params.id,
+          userId: user.id
+        },
+        include: {
+          subcategory: {
+            include: {
+              parentCategory: true,
+              characteristics: {
+                include: {
+                  values: {
+                    where: { isActive: true },
+                    orderBy: { sortOrder: 'asc' }
+                  }
+                },
+                orderBy: [
+                  { isRequired: 'desc' },
+                  { sortOrder: 'asc' },
+                  { name: 'asc' }
+                ]
+              }
             }
           }
         }
-      }
-    });
+      }),
+      'получение товара с характеристиками'
+    );
 
     if (!product) {
       return NextResponse.json({
@@ -567,188 +58,520 @@ export async function GET(
       }, { status: 404 });
     }
 
-    // Парсим данные ИИ
-    let aiData: any = { characteristics: [] };
+    console.log(`✅ Товар найден: ${product.name}, категория: ${product.subcategory?.name}`);
+
+    // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Правильный парсинг ИИ данных
+    let aiCharacteristics: any[] = [];
+    let aiData: any = null;
+    
     if (product.aiCharacteristics) {
       try {
-        // ИСПРАВЛЕНИЕ: правильная обработка JSON из Prisma
-        const aiCharacteristicsValue = product.aiCharacteristics;
-        if (typeof aiCharacteristicsValue === 'string') {
-          aiData = JSON.parse(aiCharacteristicsValue);
-        } else if (aiCharacteristicsValue && typeof aiCharacteristicsValue === 'object') {
-          aiData = aiCharacteristicsValue;
+        aiData = typeof product.aiCharacteristics === 'string' 
+          ? JSON.parse(product.aiCharacteristics) 
+          : product.aiCharacteristics;
+        
+        console.log('🔍 [Characteristics API] Структура AI данных:', Object.keys(aiData));
+        
+        // Проверяем разные возможные структуры данных
+        aiCharacteristics = aiData.characteristics || 
+                           aiData.data?.characteristics || 
+                           aiData.finalResult?.characteristics ||
+                           aiData.agents?.agent2?.characteristics ||
+                           [];
+        
+        console.log(`📊 [Characteristics API] Найдено ИИ характеристик: ${aiCharacteristics.length}`);
+        
+        if (aiCharacteristics.length > 0) {
+          console.log('🔍 [Characteristics API] Образец характеристики:', JSON.stringify(aiCharacteristics[0], null, 2));
         }
         
-        if (!aiData.characteristics) {
-          aiData.characteristics = [];
-        }
       } catch (error) {
-        console.error('❌ Ошибка парсинга aiCharacteristics:', error);
+        console.warn('⚠️ [Characteristics API] Ошибка парсинга AI характеристик:', error);
+        console.log('📄 [Characteristics API] Сырые данные:', product.aiCharacteristics?.toString().substring(0, 200));
       }
+    } else {
+      console.log('⚠️ [Characteristics API] aiCharacteristics пустые или отсутствуют');
     }
 
-    // Парсим данные WB
-    let wbData: any = {};
-    if (product.wbData) {
-      try {
-        // ИСПРАВЛЕНИЕ: правильная обработка JSON из Prisma
-        const wbDataValue = product.wbData;
-        if (typeof wbDataValue === 'string') {
-          wbData = JSON.parse(wbDataValue);
-        } else if (wbDataValue && typeof wbDataValue === 'object') {
-          wbData = wbDataValue;
-        }
-      } catch (error) {
-        console.error('❌ Ошибка парсинга wbData:', error);
-      }
-    }
+    // Получение характеристик категории
+    const categoryCharacteristics = product.subcategory?.characteristics || [];
+    console.log(`📋 [Characteristics API] Характеристик в категории: ${categoryCharacteristics.length}`);
 
-    // Получаем ВСЕ характеристики категории
-    const allCategoryCharacteristics = product.subcategory?.characteristics || [];
+    // Создание карты ИИ характеристик для быстрого поиска
+    const aiCharMap = new Map();
     
-    // Создаем карту заполненных характеристик
-    const filledCharacteristicsMap = new Map();
-    aiData.characteristics.forEach((char: any) => {
-      filledCharacteristicsMap.set(char.id, char);
+    aiCharacteristics.forEach((aiChar: any, index: number) => {
+      console.log(`🔍 [Characteristics API] Обрабатываем AI характеристику ${index}:`, {
+        id: aiChar.id,
+        characteristicId: aiChar.characteristicId,
+        wbCharacteristicId: aiChar.wbCharacteristicId,
+        name: aiChar.name,
+        value: aiChar.value,
+        hasValue: !!aiChar.value
+      });
+      
+      // Множественные варианты ID для поиска
+      const possibleIds = [
+        aiChar.id,
+        aiChar.characteristicId,
+        aiChar.wbCharacteristicId
+      ].filter(id => id !== undefined && id !== null);
+      
+      possibleIds.forEach(id => {
+        aiCharMap.set(Number(id), aiChar);
+      });
+      
+      // Поиск по имени как fallback
+      if (aiChar.name) {
+        const normalizedName = aiChar.name.toLowerCase().trim();
+        aiCharMap.set(normalizedName, aiChar);
+      }
     });
 
-    // Фильтруем габариты для отображения в интерфейсе
-    const gabaritIds = new Set([
-      89008, 90630, 90607, 90608, 90652, 90653,
-      11001, 11002, 72739, 90654, 90655
-    ]);
+    console.log(`📊 [Characteristics API] Создана карта AI характеристик: ${aiCharMap.size} записей`);
 
-    // Объединяем заполненные и незаполненные характеристики
-    const allCharacteristics = allCategoryCharacteristics.map((categoryChar: any) => {
-      const filledChar = filledCharacteristicsMap.get(categoryChar.wbCharacteristicId || categoryChar.id);
+    // ГЛАВНОЕ ИСПРАВЛЕНИЕ: Правильное объединение данных
+    const processedCharacteristics = categoryCharacteristics.map((categoryChar: any) => {
+      const charId = categoryChar.wbCharacteristicId || categoryChar.id;
+      const charName = categoryChar.name?.toLowerCase().trim();
       
-      const isGabarit = gabaritIds.has(categoryChar.wbCharacteristicId || categoryChar.id);
+      console.log(`🔍 [Characteristics API] Обрабатываем категорийную характеристику: ${categoryChar.name} (ID: ${charId})`);
       
-      if (filledChar) {
-        // Заполненная характеристика
-        return {
-          id: categoryChar.wbCharacteristicId || categoryChar.id,
-          name: categoryChar.name,
-          value: filledChar.value,
-          type: categoryChar.type,
-          confidence: filledChar.confidence || 0.7,
-          reasoning: filledChar.reasoning || 'Определено ИИ',
-          isRequired: categoryChar.isRequired,
-          isFilled: true,
-          isGabarit: isGabarit,
-          needsManualInput: isGabarit,
-          // Дополнительная информация для редактирования
-          possibleValues: categoryChar.values?.map((v: any) => ({
-            id: v.wbValueId || v.id,
-            value: v.value,
-            displayName: v.displayName || v.value
-          })) || [],
-          maxLength: categoryChar.maxLength,
-          minValue: categoryChar.minValue,
-          maxValue: categoryChar.maxValue,
-          description: categoryChar.description
-        };
+      // Поиск ИИ данных
+      let aiChar = aiCharMap.get(Number(charId)) || aiCharMap.get(charName);
+      
+      // Дополнительный поиск по частичному совпадению имени
+      if (!aiChar && charName) {
+        for (let [key, value] of aiCharMap.entries()) {
+          if (typeof key === 'string') {
+            const keyNormalized = key.replace(/\s+/g, '').toLowerCase();
+            const nameNormalized = charName.replace(/\s+/g, '').toLowerCase();
+            
+            if (keyNormalized.includes(nameNormalized) || 
+                nameNormalized.includes(keyNormalized) ||
+                key.includes(charName) || 
+                charName.includes(key)) {
+              aiChar = value;
+              console.log(`✅ [Characteristics API] Найдено совпадение по имени: "${charName}" -> "${key}"`);
+              break;
+            }
+          }
+        }
+      }
+
+      // Определение категории и значений
+      let category: 'ai_filled' | 'manual_required' | 'user_protected' | 'declaration' = 'ai_filled';
+      let isFilled = false;
+      let value = '';
+      let confidence = 0;
+      let reasoning = '';
+
+      // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Правильная обработка значений
+      if (aiChar) {
+        console.log(`🔍 [Characteristics API] Найдены AI данные для ${categoryChar.name}:`, {
+          value: aiChar.value,
+          confidence: aiChar.confidence,
+          reasoning: aiChar.reasoning
+        });
+        
+        const aiValue = aiChar.value;
+        if (aiValue !== undefined && aiValue !== null && String(aiValue).trim() !== '' && String(aiValue) !== 'null') {
+          isFilled = true;
+          value = String(aiValue);
+          confidence = aiChar.confidence || 0.85;
+          reasoning = aiChar.reasoning || 'Заполнено системой ИИ';
+          category = 'ai_filled';
+          
+          console.log(`✅ [Characteristics API] Характеристика заполнена: ${categoryChar.name} = "${value}"`);
+        } else {
+          console.log(`⚠️ [Characteristics API] AI характеристика найдена, но значение пустое: ${categoryChar.name}`);
+        }
       } else {
-        // Незаполненная характеристика
-        return {
-          id: categoryChar.wbCharacteristicId || categoryChar.id,
-          name: categoryChar.name,
-          value: null,
-          type: categoryChar.type,
-          confidence: 0,
-          reasoning: isGabarit ? 'Требует ручного измерения' : 'Не заполнено',
-          isRequired: categoryChar.isRequired,
-          isFilled: false,
-          isGabarit: isGabarit,
-          needsManualInput: isGabarit,
-          // Дополнительная информация для заполнения
-          possibleValues: categoryChar.values?.map((v: any) => ({
-            id: v.wbValueId || v.id,
-            value: v.value,
-            displayName: v.displayName || v.value
-          })) || [],
-          maxLength: categoryChar.maxLength,
-          minValue: categoryChar.minValue,
-          maxValue: categoryChar.maxValue,
-          description: categoryChar.description
-        };
+        console.log(`❌ [Characteristics API] AI данные не найдены для: ${categoryChar.name} (ID: ${charId})`);
       }
+
+      // Специальные категории
+      const MANUAL_INPUT_IDS = new Set([89008, 90630, 90607, 90608, 90652, 90653, 11002, 90654, 90655]);
+      const PROTECTED_USER_IDS = new Set([14177441, 378533, 14177449]);
+      const DECLARATION_IDS = new Set([14177472, 14177473, 14177474, 74941, 15001135, 15001136]);
+
+      if (DECLARATION_IDS.has(charId)) {
+        category = 'declaration';
+        reasoning = 'НДС/Декларационные данные';
+      } else if (MANUAL_INPUT_IDS.has(charId)) {
+        category = 'manual_required';
+        reasoning = 'Требует ручного ввода';
+      } else if (PROTECTED_USER_IDS.has(charId)) {
+        category = 'user_protected';
+        reasoning = 'Защищенные данные';
+      }
+
+      const result = {
+        id: charId,
+        name: categoryChar.name,
+        value: value,
+        confidence: confidence,
+        reasoning: reasoning,
+        type: categoryChar.type === 'number' ? 'number' : 'string',
+        isRequired: categoryChar.isRequired || false,
+        isFilled: isFilled,
+        category: category,
+        source: aiChar ? 'ai_analysis' : 'not_filled',
+        
+        // Дополнительные данные для UI
+        possibleValues: (categoryChar.values || []).map((v: any) => ({
+          id: v.wbValueId || v.id,
+          value: v.value,
+          displayName: v.displayName || v.value
+        })),
+        maxLength: categoryChar.maxLength,
+        minValue: categoryChar.minValue,
+        maxValue: categoryChar.maxValue,
+        description: categoryChar.description,
+        
+        // Флаги для интерфейса
+        showInUI: true,
+        isEditable: category === 'ai_filled'
+      };
+
+      console.log(`📝 [Characteristics API] Результат обработки ${categoryChar.name}:`, {
+        isFilled: result.isFilled,
+        value: result.value,
+        category: result.category
+      });
+
+      return result;
     });
 
-    // Сортируем: сначала обязательные, потом габариты, потом заполненные, потом незаполненные
-    allCharacteristics.sort((a, b) => {
-      if (a.isRequired !== b.isRequired) {
-        return b.isRequired ? 1 : -1; // Обязательные первыми
-      }
-      if (a.isGabarit !== b.isGabarit) {
-        return b.isGabarit ? 1 : -1; // Габариты вторыми (для ручного заполнения)
-      }
-      if (a.isFilled !== b.isFilled) {
-        return b.isFilled ? 1 : -1; // Заполненные третьими
-      }
-      return a.name.localeCompare(b.name); // Алфавитный порядок
-    });
+    // Статистика
+    const filledCount = processedCharacteristics.filter(c => c.isFilled).length;
+    const fillRate = processedCharacteristics.length > 0 
+      ? Math.round((filledCount / processedCharacteristics.length) * 100) 
+      : 0;
 
-    // Статистика с учетом габаритов
     const stats = {
-      total: allCharacteristics.length,
-      filled: allCharacteristics.filter(c => c.isFilled).length,
-      required: allCharacteristics.filter(c => c.isRequired).length,
-      requiredFilled: allCharacteristics.filter(c => c.isRequired && c.isFilled).length,
-      optional: allCharacteristics.filter(c => !c.isRequired).length,
-      optionalFilled: allCharacteristics.filter(c => !c.isRequired && c.isFilled).length,
-      gabarit: allCharacteristics.filter(c => c.isGabarit).length,
-      gabaritFilled: allCharacteristics.filter(c => c.isGabarit && c.isFilled).length,
-      needsManualInput: allCharacteristics.filter(c => c.needsManualInput && !c.isFilled).length
+      total: processedCharacteristics.length,
+      filled: filledCount,
+      required: processedCharacteristics.filter(c => c.isRequired).length,
+      aiFilled: processedCharacteristics.filter(c => c.category === 'ai_filled' && c.isFilled).length,
+      manualRequired: processedCharacteristics.filter(c => c.category === 'manual_required').length,
+      userProtected: processedCharacteristics.filter(c => c.category === 'user_protected').length,
+      declaration: processedCharacteristics.filter(c => c.category === 'declaration').length,
+      fillRate: fillRate
     };
 
-    console.log(`📊 Статистика характеристик:`, stats);
+    console.log(`📊 [Characteristics API] Финальная статистика:`, stats);
 
+    // Формирование ответа
     return NextResponse.json({
       success: true,
-      data: {
+      characteristics: processedCharacteristics,
+      stats: stats,
+      productInfo: {
         id: product.id,
         name: product.name,
         generatedName: product.generatedName,
         seoDescription: product.seoDescription,
         status: product.status,
-        price: product.price,
         category: product.subcategory ? {
           id: product.subcategory.id,
           name: product.subcategory.name,
-          parentName: product.subcategory.parentCategory?.name || 'Неизвестно',
-          displayName: `${product.subcategory.parentCategory?.name || 'Неизвестно'} / ${product.subcategory.name}`
-        } : null,
-        // ОСНОВНЫЕ ДАННЫЕ: все характеристики (заполненные + незаполненные + габариты)
-        characteristics: allCharacteristics,
-        // ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ
-        stats,
-        wbCardData: aiData.wbCardData,
-        vendorCode: wbData.userVendorCode,
-        barcode: wbData.barcode,
-        originalPrice: wbData.originalPrice,
-        discountPrice: wbData.discountPrice,
-        finalPrice: wbData.finalPrice,
-        hasVariantSizes: wbData.hasVariantSizes,
-        variantSizes: wbData.variantSizes,
-        comments: wbData.comments,
-        createdAt: product.createdAt,
-        updatedAt: product.updatedAt,
-        
-        // НОВАЯ ИНФОРМАЦИЯ О ГАБАРИТАХ
-        gabaritInfo: {
-          needsManualInput: stats.needsManualInput,
-          totalGabarits: stats.gabarit,
-          filledGabarits: stats.gabaritFilled,
-          message: stats.needsManualInput > 0 ? 
-            `Необходимо заполнить ${stats.needsManualInput} габаритных характеристик вручную` : 
-            'Все габариты заполнены'
-        }
+          parentName: product.subcategory.parentCategory?.name
+        } : null
+      },
+      
+      // Для обратной совместимости
+      aiCharacteristics: processedCharacteristics,
+      allCategoryCharacteristics: categoryCharacteristics,
+      
+      // Дополнительная информация
+      meta: {
+        originalAICharacteristics: aiCharacteristics.length,
+        aiCharMapSize: aiCharMap.size,
+        processingMethod: product.processingMethod || 'unknown',
+        hasAiData: !!aiData,
+        timestamp: new Date().toISOString()
       }
     });
 
   } catch (error) {
-    console.error('❌ Ошибка получения характеристик:', error);
+    console.error('❌ [Characteristics API] Ошибка получения характеристик:', error);
+    return NextResponse.json({
+      success: false,
+      error: 'Внутренняя ошибка сервера',
+      details: error instanceof Error ? error.message : 'Неизвестная ошибка',
+      timestamp: new Date().toISOString()
+    }, { status: 500 });
+  }
+}
+
+// PUT метод - обновление характеристик товара
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    console.log(`✏️ [Characteristics API] Обновление характеристики товара: ${params.id}`);
+
+    const user = await AuthService.getCurrentUser();
+    if (!user) {
+      return NextResponse.json({
+        success: false,
+        error: 'Не авторизован'
+      }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { characteristicId, value, action } = body;
+
+    console.log('📝 [Characteristics API] Данные запроса:', { characteristicId, value, action });
+
+    if (action === 'update' && characteristicId !== undefined && value !== undefined) {
+      // Получение товара
+      const product = await safePrismaOperation(
+        () => prisma.product.findFirst({
+          where: {
+            id: params.id,
+            userId: user.id
+          }
+        }),
+        'получение товара для обновления'
+      );
+
+      if (!product) {
+        return NextResponse.json({
+          success: false,
+          error: 'Товар не найден'
+        }, { status: 404 });
+      }
+
+      // Парсинг существующих AI характеристик
+      let aiData: any = {};
+      if (product.aiCharacteristics) {
+        try {
+          aiData = typeof product.aiCharacteristics === 'string'
+            ? JSON.parse(product.aiCharacteristics)
+            : product.aiCharacteristics;
+        } catch (error) {
+          console.warn('⚠️ [Characteristics API] Ошибка парсинга AI характеристик:', error);
+          aiData = { characteristics: [] };
+        }
+      }
+
+      // Получение массива характеристик
+      const characteristics = aiData.characteristics || [];
+      console.log(`📊 [Characteristics API] Найдено характеристик: ${characteristics.length}`);
+
+      // Поиск характеристики для обновления
+      const existingIndex = characteristics.findIndex((char: any) => 
+        char.id === characteristicId || 
+        char.id === parseInt(characteristicId) ||
+        char.characteristicId === characteristicId ||
+        char.characteristicId === parseInt(characteristicId)
+      );
+
+      if (existingIndex >= 0) {
+        // Обновление существующей характеристики
+        console.log(`✏️ [Characteristics API] Обновляем характеристику: ${characteristics[existingIndex].name}`);
+        characteristics[existingIndex] = {
+          ...characteristics[existingIndex],
+          value: value,
+          isFilled: !!value,
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'user'
+        };
+      } else {
+        // Добавление новой характеристики
+        console.log(`➕ [Characteristics API] Добавляем новую характеристику с ID: ${characteristicId}`);
+        characteristics.push({
+          id: parseInt(characteristicId) || characteristicId,
+          characteristicId: parseInt(characteristicId) || characteristicId,
+          name: `Характеристика ${characteristicId}`,
+          value: value,
+          confidence: 1.0,
+          reasoning: 'Добавлено пользователем',
+          source: 'user_input',
+          type: 'string',
+          isFilled: !!value,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'user'
+        });
+      }
+
+      // Обновление данных с системной информацией
+      const updatedAiData = {
+        ...aiData,
+        characteristics: characteristics,
+        lastUpdated: new Date().toISOString(),
+        updatedBy: user.id,
+        systemVersion: aiData.systemVersion || 'user_updated_v1',
+        userModifications: (aiData.userModifications || 0) + 1
+      };
+
+      // Сохранение в базу данных
+      await safePrismaOperation(
+        () => prisma.product.update({
+          where: { id: params.id },
+          data: {
+            aiCharacteristics: JSON.stringify(updatedAiData),
+            updatedAt: new Date()
+          }
+        }),
+        'обновление характеристик в БД'
+      );
+
+      console.log('✅ [Characteristics API] Характеристика обновлена успешно');
+
+      // Подсчет статистики после обновления
+      const filledCharacteristics = characteristics.filter((c: any) => c.isFilled);
+      const fillRate = characteristics.length > 0 
+        ? Math.round((filledCharacteristics.length / characteristics.length) * 100) 
+        : 0;
+
+      return NextResponse.json({
+        success: true,
+        message: 'Характеристика обновлена успешно',
+        data: {
+          characteristicId,
+          value,
+          totalCharacteristics: characteristics.length,
+          filledCharacteristics: filledCharacteristics.length,
+          fillRate: fillRate,
+          updatedAt: new Date().toISOString()
+        }
+      });
+    }
+
+    return NextResponse.json({
+      success: false,
+      error: 'Неверные параметры запроса. Ожидается: { action: "update", characteristicId: number, value: string }'
+    }, { status: 400 });
+
+  } catch (error) {
+    console.error('❌ [Characteristics API] Ошибка обновления характеристик:', error);
+    return NextResponse.json({
+      success: false,
+      error: 'Внутренняя ошибка сервера',
+      details: error instanceof Error ? error.message : 'Неизвестная ошибка',
+      timestamp: new Date().toISOString()
+    }, { status: 500 });
+  }
+}
+
+// DELETE метод - удаление характеристики
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    console.log(`🗑️ [Characteristics API] Удаление характеристики товара: ${params.id}`);
+
+    const user = await AuthService.getCurrentUser();
+    if (!user) {
+      return NextResponse.json({
+        success: false,
+        error: 'Не авторизован'
+      }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const characteristicId = searchParams.get('characteristicId');
+
+    if (!characteristicId) {
+      return NextResponse.json({
+        success: false,
+        error: 'Не указан ID характеристики для удаления'
+      }, { status: 400 });
+    }
+
+    // Получение товара
+    const product = await safePrismaOperation(
+      () => prisma.product.findFirst({
+        where: {
+          id: params.id,
+          userId: user.id
+        }
+      }),
+      'получение товара для удаления характеристики'
+    );
+
+    if (!product) {
+      return NextResponse.json({
+        success: false,
+        error: 'Товар не найден'
+      }, { status: 404 });
+    }
+
+    // Парсинг AI характеристик
+    let aiData: any = {};
+    if (product.aiCharacteristics) {
+      try {
+        aiData = typeof product.aiCharacteristics === 'string'
+          ? JSON.parse(product.aiCharacteristics)
+          : product.aiCharacteristics;
+      } catch (error) {
+        console.warn('⚠️ [Characteristics API] Ошибка парсинга AI характеристик:', error);
+        return NextResponse.json({
+          success: false,
+          error: 'Ошибка обработки характеристик товара'
+        }, { status: 500 });
+      }
+    }
+
+    const characteristics = aiData.characteristics || [];
+    const initialCount = characteristics.length;
+
+    // Удаление характеристики
+    const filteredCharacteristics = characteristics.filter((char: any) => 
+      char.id !== parseInt(characteristicId) && 
+      char.id !== characteristicId &&
+      char.characteristicId !== parseInt(characteristicId) &&
+      char.characteristicId !== characteristicId
+    );
+
+    if (filteredCharacteristics.length === initialCount) {
+      return NextResponse.json({
+        success: false,
+        error: 'Характеристика не найдена'
+      }, { status: 404 });
+    }
+
+    // Обновление данных
+    const updatedAiData = {
+      ...aiData,
+      characteristics: filteredCharacteristics,
+      lastUpdated: new Date().toISOString(),
+      deletedBy: user.id,
+      userDeletions: (aiData.userDeletions || 0) + 1
+    };
+
+    // Сохранение в базу данных
+    await safePrismaOperation(
+      () => prisma.product.update({
+        where: { id: params.id },
+        data: {
+          aiCharacteristics: JSON.stringify(updatedAiData),
+          updatedAt: new Date()
+        }
+      }),
+      'удаление характеристики из БД'
+    );
+
+    console.log(`✅ [Characteristics API] Характеристика ${characteristicId} удалена`);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Характеристика успешно удалена',
+      data: {
+        deletedCharacteristicId: characteristicId,
+        remainingCharacteristics: filteredCharacteristics.length,
+        deletedAt: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ [Characteristics API] Ошибка удаления характеристики:', error);
     return NextResponse.json({
       success: false,
       error: 'Внутренняя ошибка сервера',

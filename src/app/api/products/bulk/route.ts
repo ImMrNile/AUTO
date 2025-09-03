@@ -1,10 +1,8 @@
 // src/app/api/products/bulk/route.ts - API МАССОВЫХ ОПЕРАЦИЙ
 
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../../../../lib/prisma';
 import { wbApiService } from '../../../../../lib/services/wbApiService';
-
-const prisma = new PrismaClient();
 
 export async function POST(request: NextRequest) {
   try {

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useAuth } from '../../components/AuthProvider';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('loginjon90@gmail.com');
@@ -10,6 +11,7 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
+  const { refreshUser } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,6 +34,9 @@ export default function LoginPage() {
       if (response.ok && data.success) {
         console.log('✅ Авторизация успешна:', data.user);
         setError('');
+        
+        // Обновляем контекст пользователя
+        await refreshUser();
         
         // Перенаправляем на главную страницу
         router.push('/');

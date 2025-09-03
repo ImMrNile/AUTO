@@ -556,14 +556,16 @@ async function validateWBToken(token: string): Promise<{
       console.log(`📡 [API Cabinets] Проверяем ${endpoint.name}: ${endpoint.url}`);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // Увеличен до 30 секунд
 
       const response = await fetch(endpoint.url, {
         method: 'GET',
         headers: {
           'Authorization': token,
           'Content-Type': 'application/json',
-          'User-Agent': 'WB-Automation/1.0'
+          'Accept': 'application/json',
+          'User-Agent': 'WB-AI-Assistant/2.0',
+          'Connection': 'keep-alive'
         },
         signal: controller.signal
       });
@@ -595,13 +597,15 @@ async function validateWBToken(token: string): Promise<{
       hasNetworkError = true;
       
       if (error.name === 'AbortError') {
-        lastError = 'Превышен таймаут подключения (более 10 секунд)';
+        lastError = 'Превышен таймаут подключения (более 30 секунд)';
       } else if (error.message.includes('ENOTFOUND')) {
         lastError = 'Не удается найти сервер API Wildberries';
       } else if (error.message.includes('fetch failed')) {
         lastError = 'Ошибка сетевого соединения с API';
+      } else if (error.message.includes('UND_ERR_CONNECT_TIMEOUT')) {
+        lastError = 'Таймаут подключения к API Wildberries. Попробуйте позже.';
       } else {
-        lastError = 'Ошибка сетевого соединения';
+        lastError = `Ошибка сетевого соединения: ${error.message}`;
       }
     }
 

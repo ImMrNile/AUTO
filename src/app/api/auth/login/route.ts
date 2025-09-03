@@ -6,6 +6,19 @@ export async function POST(request: NextRequest) {
   try {
     console.log('🔐 [API Login] Начало обработки запроса...');
     
+    // Обеспечиваем подключение к БД
+    console.log('🔐 [API Login] Подключение к БД...');
+    try {
+      await prisma.$connect();
+      console.log('✅ [API Login] Prisma connected successfully');
+    } catch (connectError) {
+      console.error('❌ [API Login] Failed to connect to database:', connectError);
+      return NextResponse.json({
+        success: false,
+        error: 'Не удается подключиться к базе данных'
+      }, { status: 503 });
+    }
+    
     const body = await request.json();
     console.log('🔐 [API Login] Тело запроса получено:', { email: body.email, hasPassword: !!body.password });
     

@@ -1,420 +1,292 @@
-// app/api/products/[id]/publish/route.ts - ПОЛНЫЙ РОУТЕР ДЛЯ ПУБЛИКАЦИИ
-import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '../../../../../lib/prisma';
-import { AuthService } from '../../../../../lib/auth/auth-service';
+// src/app/api/products/[id]/route.ts - ИСПРАВЛЕННАЯ ВЕРСИЯ
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma, safePrismaOperation } from '@/lib/prisma';
+import { AuthService } from '@/lib/auth/auth-service';
+import { unifiedAISystem } from '@/lib/services/unifiedAISystem';
+
+// GET метод для получения полной информации о товаре
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
-    console.log('🚀 Получен запрос на публикацию товара');
-    
-    // Авторизация
+    console.log(`📦 Получение товара ID: ${params.id}`);
+
+    // Проверка авторизации
     const user = await AuthService.getCurrentUser();
     if (!user) {
-      return NextResponse.json({
-        success: false,
+      return NextResponse.json({ 
         error: 'Не авторизован'
       }, { status: 401 });
     }
 
-    const productId = params.id;
-    
-    // Безопасное извлечение данных из тела запроса
-    let body;
-    try {
-      const textBody = await request.text();
-      console.log('📦 Raw body length:', textBody?.length || 0);
-      
-      if (!textBody || textBody.trim() === '') {
-        body = { cabinetIds: [] };
-      } else {
-        body = JSON.parse(textBody);
-      }
-    } catch (parseError) {
-      console.error('❌ Ошибка парсинга JSON:', parseError);
-      return NextResponse.json({
-        success: false,
-        error: 'Некорректный формат данных запроса'
-      }, { status: 400 });
-    }
-    
-    let { cabinetIds } = body;
-    
-    console.log('📦 Данные публикации:', {
-      productId,
-      cabinetIds,
-      cabinetsCount: cabinetIds?.length || 0
-    });
-
-    // Валидация productId
-    if (!productId) {
-      return NextResponse.json({
-        success: false,
-        error: 'ID товара не указан'
-      }, { status: 400 });
-    }
-
-    // Получаем товар
-    const product = await prisma.product.findFirst({
-      where: {
-        id: productId,
-        userId: user.id
-      },
-      include: {
-        subcategory: true,
-        productCabinets: {
-          include: {
-            cabinet: true
+    // Получение товара с полной информацией
+    const product = await safePrismaOperation(
+      () => prisma.product.findFirst({
+        where: { 
+          id: params.id,
+          userId: user.id // Проверка принадлежности пользователю
+        },
+        select: {
+          id: true,
+          name: true,
+          price: true,
+          status: true,
+          originalImage: true,
+          referenceUrl: true,
+          dimensions: true,
+          workflowId: true,
+          processingMethod: true,
+          generatedName: true,
+          seoDescription: true,
+          colorAnalysis: true,
+          suggestedCategory: true,
+          aiCharacteristics: true,
+          wbData: true,
+          errorMessage: true,
+          publishedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          subcategoryId: true,
+          
+          // Связанные данные
+          subcategory: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              parentCategory: {
+                select: {
+                  id: true,
+                  name: true,
+                  slug: true
+                }
+              }
+            }
+          },
+          
+          productCabinets: {
+            include: {
+              cabinet: {
+                select: {
+                  id: true,
+                  name: true,
+                  isActive: true
+                }
+              }
+            }
           }
         }
-      }
-    });
+      }),
+      'получение товара'
+    );
 
     if (!product) {
-      return NextResponse.json({
-        success: false,
+      return NextResponse.json({ 
         error: 'Товар не найден или у вас нет доступа к нему'
       }, { status: 404 });
     }
 
-    // Проверяем статус товара
-    if (!['READY', 'ANALYZED', 'DRAFT'].includes(product.status)) {
-      return NextResponse.json({
-        success: false,
-        error: `Товар в статусе "${product.status}" не может быть опубликован`
-      }, { status: 400 });
-    }
-
-    // Если кабинеты не указаны, используем все связанные с товаром
-    if (!cabinetIds || !Array.isArray(cabinetIds) || cabinetIds.length === 0) {
-      console.log('⚠️ Кабинеты не указаны, используем связанные с товаром...');
-      
-      // Получаем кабинеты связанные с товаром
-      const linkedCabinets = product.productCabinets
-        .filter(pc => pc.cabinet.isActive)
-        .map(pc => pc.cabinet.id);
-      
-      if (linkedCabinets.length === 0) {
-        // Если нет связанных кабинетов, получаем все доступные пользователю
-        const userCabinets = await prisma.cabinet.findMany({
-          where: {
-            userId: user.id,
-            isActive: true
-          }
-        });
-        
-        cabinetIds = userCabinets.map(c => c.id);
-      } else {
-        cabinetIds = linkedCabinets;
-      }
-      
-      if (cabinetIds.length === 0) {
-        return NextResponse.json({
-          success: false,
-          error: 'У пользователя нет активных кабинетов для публикации'
-        }, { status: 400 });
-      }
-      
-      console.log(`✅ Используем ${cabinetIds.length} кабинетов`);
-    }
-
-    // Проверяем, что все указанные кабинеты существуют и принадлежат пользователю
-    const cabinets = await prisma.cabinet.findMany({
-      where: {
-        id: { in: cabinetIds },
-        userId: user.id,
-        isActive: true
-      }
-    });
-
-    if (cabinets.length !== cabinetIds.length) {
-      const foundIds = cabinets.map(c => c.id);
-      const missingIds = cabinetIds.filter(id => !foundIds.includes(id));
-      
-      return NextResponse.json({
-        success: false,
-        error: `Кабинеты не найдены или неактивны: ${missingIds.join(', ')}`
-      }, { status: 400 });
-    }
-
-    console.log(`✅ Найдено ${cabinets.length} активных кабинетов для публикации`);
-
-    // Создаем записи публикации для каждого кабинета
-    const publications = [];
-    let successCount = 0;
-    let failureCount = 0;
+    // Парсинг и обработка характеристик ИИ
+    let processedAiCharacteristics = null;
+    let characteristicsCount = 0;
+    let qualityMetrics = null;
+    let analysisReport = null;
     
-    for (const cabinet of cabinets) {
-      console.log(`📤 Обработка кабинета: ${cabinet.name}`);
-      
+    if (product.aiCharacteristics) {
       try {
-        // Проверяем, есть ли уже публикация в этом кабинете
-        const existingPublication = await prisma.productPublication.findUnique({
-          where: {
-            productId_cabinetId: {
-              productId: productId,
-              cabinetId: cabinet.id
-            }
-          }
-        });
-
-        let publication;
+        let aiData;
         
-        if (existingPublication) {
-          // Обновляем существующую публикацию
-          publication = await prisma.productPublication.update({
-            where: { id: existingPublication.id },
-            data: {
-              status: 'QUEUED',
-              errorMessage: null,
-              price: product.price,
-              updatedAt: new Date()
-            }
-          });
-          console.log(`🔄 Обновлена публикация: ${publication.id}`);
-        } else {
-          // Создаем новую публикацию
-          publication = await prisma.productPublication.create({
-            data: {
-              productId: productId,
-              cabinetId: cabinet.id,
-              status: 'QUEUED',
-              price: product.price
-            }
-          });
-          console.log(`✨ Создана публикация: ${publication.id}`);
+        if (typeof product.aiCharacteristics === 'object') {
+          aiData = product.aiCharacteristics;
+        } else if (typeof product.aiCharacteristics === 'string') {
+          aiData = JSON.parse(product.aiCharacteristics);
         }
-
-        publications.push({
-          id: publication.id,
-          cabinetId: cabinet.id,
-          cabinetName: cabinet.name,
-          status: publication.status
-        });
-
-        successCount++;
-        console.log(`📋 Публикация добавлена в очередь: ${publication.id}`);
         
-      } catch (error) {
-        console.error(`❌ Ошибка для кабинета ${cabinet.name}:`, error);
+        if (aiData) {
+          processedAiCharacteristics = {
+            characteristics: aiData.characteristics || [],
+            confidence: aiData.confidence || 0,
+            warnings: aiData.warnings || [],
+            recommendations: aiData.recommendations || [],
+            systemVersion: aiData.systemVersion || 'unknown',
+            processedAt: aiData.processedAt
+          };
+          
+          characteristicsCount = aiData.characteristics?.length || 0;
+          qualityMetrics = aiData.qualityMetrics;
+          analysisReport = aiData.analysisReport;
+          
+          console.log(`📊 Обработано характеристик ИИ: ${characteristicsCount}`);
+        }
         
-        publications.push({
-          cabinetId: cabinet.id,
-          cabinetName: cabinet.name,
-          status: 'FAILED',
-          error: error instanceof Error ? error.message : 'Неизвестная ошибка'
-        });
-        
-        failureCount++;
+      } catch (parseError) {
+        console.warn('⚠️ Ошибка парсинга характеристик ИИ:', parseError);
+        processedAiCharacteristics = {
+          characteristics: [],
+          confidence: 0,
+          warnings: ['Ошибка парсинга данных ИИ'],
+          recommendations: [],
+          systemVersion: 'unknown'
+        };
       }
     }
 
-    // Обновляем статус товара только если есть успешные публикации
-    if (successCount > 0) {
-      await prisma.product.update({
-        where: { id: productId },
-        data: {
-          status: 'QUEUED_FOR_PUBLICATION',
-          updatedAt: new Date()
-        }
-      });
+    // Обработка данных WB
+    let processedWbData = null;
+    if (product.wbData) {
+      try {
+        processedWbData = typeof product.wbData === 'object' 
+          ? product.wbData 
+          : JSON.parse(product.wbData as string);
+      } catch (wbParseError) {
+        console.warn('⚠️ Ошибка парсинга WB данных:', wbParseError);
+      }
     }
 
-    console.log(`✅ Публикация завершена: ${successCount} успешно, ${failureCount} с ошибками`);
-
-    // Возвращаем результат
-    return NextResponse.json({
+    // Формирование полного ответа
+    const responseData = {
       success: true,
-      message: successCount > 0 
-        ? `Товар поставлен в очередь на публикацию в ${successCount} кабинет(ах)${failureCount > 0 ? ` (${failureCount} ошибок)` : ''}`
-        : 'Не удалось создать ни одной публикации',
-      data: {
-        productId: productId,
-        productName: product.name,
-        totalCabinets: cabinetIds.length,
-        successfulPublications: successCount,
-        failedPublications: failureCount,
-        publications: publications,
-        productStatus: successCount > 0 ? 'QUEUED_FOR_PUBLICATION' : product.status
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Критическая ошибка публикации товара:', error);
-    
-    return NextResponse.json({
-      success: false,
-      error: 'Внутренняя ошибка сервера при публикации товара',
-      details: error instanceof Error ? error.message : 'Неизвестная ошибка'
-    }, { status: 500 });
-  } finally {
-    await prisma.$disconnect();
-  }
-}
-
-// GET - получение статуса публикаций товара
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
-  try {
-    console.log('📊 Получение статуса публикаций товара');
-    
-    // Авторизация
-    const user = await AuthService.getCurrentUser();
-    if (!user) {
-      return NextResponse.json({
-        success: false,
-        error: 'Не авторизован'
-      }, { status: 401 });
-    }
-
-    const productId = params.id;
-
-    // Получаем товар с публикациями
-    const product = await prisma.product.findFirst({
-      where: {
-        id: productId,
-        userId: user.id
+      product: {
+        // Основная информация
+        id: product.id,
+        name: product.name,
+        generatedName: product.generatedName,
+        price: product.price,
+        status: product.status,
+        originalImage: product.originalImage,
+        referenceUrl: product.referenceUrl,
+        dimensions: product.dimensions,
+        seoDescription: product.seoDescription,
+        errorMessage: product.errorMessage,
+        
+        // Метаданные
+        workflowId: product.workflowId,
+        processingMethod: product.processingMethod,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt,
+        publishedAt: product.publishedAt,
+        
+        // Категория
+        category: product.subcategory ? {
+          id: product.subcategory.id,
+          name: product.subcategory.name,
+          slug: product.subcategory.slug,
+          parentCategory: product.subcategory.parentCategory
+        } : null,
+        
+        // Кабинеты
+        cabinets: product.productCabinets.map(pc => ({
+          id: pc.cabinet.id,
+          name: pc.cabinet.name,
+          isActive: pc.cabinet.isActive,
+          isSelected: pc.isSelected
+        })),
+        
+        // Данные ИИ анализа
+        aiAnalysis: processedAiCharacteristics,
+        characteristicsCount,
+        qualityMetrics,
+        analysisReport,
+        
+        // WB данные
+        wbData: processedWbData
       },
-      include: {
-        publications: {
-          include: {
-            cabinet: true
-          },
-          orderBy: { createdAt: 'desc' }
+      
+      // Дополнительная информация для клиента
+      meta: {
+        hasAiAnalysis: !!processedAiCharacteristics,
+        hasQualityMetrics: !!qualityMetrics,
+        systemVersion: processedAiCharacteristics?.systemVersion || 'unknown',
+        dataIntegrity: {
+          aiCharacteristics: !!processedAiCharacteristics,
+          wbData: !!processedWbData,
+          category: !!product.subcategory,
+          cabinets: product.productCabinets.length > 0
         }
       }
-    });
-
-    if (!product) {
-      return NextResponse.json({
-        success: false,
-        error: 'Товар не найден'
-      }, { status: 404 });
-    }
-
-    // Статистика публикаций
-    const stats = {
-      total: product.publications.length,
-      pending: product.publications.filter(p => p.status === 'PENDING').length,
-      queued: product.publications.filter(p => p.status === 'QUEUED').length,
-      publishing: product.publications.filter(p => p.status === 'PUBLISHING').length,
-      published: product.publications.filter(p => p.status === 'PUBLISHED').length,
-      failed: product.publications.filter(p => p.status === 'FAILED').length,
-      unpublished: product.publications.filter(p => p.status === 'UNPUBLISHED').length
     };
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        productId: product.id,
-        productName: product.name,
-        productStatus: product.status,
-        publicationStats: stats,
-        publications: product.publications.map(pub => ({
-          id: pub.id,
-          cabinetId: pub.cabinetId,
-          cabinetName: pub.cabinet.name,
-          status: pub.status,
-          wbTaskId: pub.wbTaskId,
-          wbNmId: pub.wbNmId,
-          price: pub.price,
-          discountPrice: pub.discountPrice,
-          publishedAt: pub.publishedAt,
-          errorMessage: pub.errorMessage,
-          lastSyncAt: pub.lastSyncAt,
-          createdAt: pub.createdAt,
-          updatedAt: pub.updatedAt
-        }))
-      }
-    });
+    return NextResponse.json(responseData);
 
   } catch (error) {
-    console.error('❌ Ошибка получения статуса публикаций:', error);
+    console.error('❌ Ошибка получения товара:', error);
     
+    let errorMessage = 'Внутренняя ошибка сервера';
+    let errorDetails = '';
+    let errorCategory = 'unknown';
+    
+    if (error instanceof Error) {
+      if (error.message.includes('P1001') || error.message.includes('database server')) {
+        errorMessage = 'Временные проблемы с базой данных';
+        errorCategory = 'database';
+      } else if (error.message.includes('timeout') || error.message.includes('connection')) {
+        errorMessage = 'Проблемы с подключением';
+        errorCategory = 'network';
+      } else {
+        errorDetails = error.message;
+        errorCategory = 'application';
+      }
+    }
+
     return NextResponse.json({
       success: false,
-      error: 'Внутренняя ошибка сервера',
-      details: error instanceof Error ? error.message : 'Неизвестная ошибка'
+      error: errorMessage,
+      errorCategory,
+      details: errorDetails,
+      timestamp: new Date().toISOString()
     }, { status: 500 });
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
-// DELETE - отмена/удаление публикации
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+// PUT метод для обновления товара
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
-    console.log('🗑️ Отмена публикации товара');
-    
-    // Авторизация
+    console.log(`✏️ Обновление товара ID: ${params.id}`);
+
     const user = await AuthService.getCurrentUser();
     if (!user) {
-      return NextResponse.json({
-        success: false,
+      return NextResponse.json({ 
         error: 'Не авторизован'
       }, { status: 401 });
     }
 
-    const productId = params.id;
-    const { searchParams } = new URL(request.url);
-    const cabinetId = searchParams.get('cabinetId');
-
-    if (cabinetId) {
-      // Отменяем публикацию в конкретном кабинете
-      const publication = await prisma.productPublication.findFirst({
-        where: {
-          productId: productId,
-          cabinetId: cabinetId,
-          product: { userId: user.id }
-        }
-      });
-
-      if (!publication) {
-        return NextResponse.json({
-          success: false,
-          error: 'Публикация не найдена'
-        }, { status: 404 });
-      }
-
-      await prisma.productPublication.update({
-        where: { id: publication.id },
-        data: {
-          status: 'UNPUBLISHED',
-          updatedAt: new Date()
-        }
-      });
-
-      console.log(`✅ Публикация отменена для кабинета ${cabinetId}`);
-    } else {
-      // Отменяем все публикации товара
-      const updatedPublications = await prisma.productPublication.updateMany({
-        where: {
-          productId: productId,
-          product: { userId: user.id }
+    const updateData = await request.json();
+    
+    // Обновление товара
+    const updatedProduct = await safePrismaOperation(
+      () => prisma.product.update({
+        where: { 
+          id: params.id,
+          userId: user.id // Проверка принадлежности
         },
         data: {
-          status: 'UNPUBLISHED',
+          ...updateData,
           updatedAt: new Date()
         }
-      });
+      }),
+      'обновление товара'
+    );
 
-      console.log(`✅ Отменено ${updatedPublications.count} публикаций`);
-    }
+    console.log(`✅ Товар ${params.id} обновлен`);
 
     return NextResponse.json({
       success: true,
-      message: cabinetId 
-        ? 'Публикация в кабинете отменена'
-        : 'Все публикации товара отменены'
+      message: 'Товар успешно обновлен',
+      product: updatedProduct
     });
 
   } catch (error) {
-    console.error('❌ Ошибка отмены публикации:', error);
+    console.error('❌ Ошибка обновления товара:', error);
     
     return NextResponse.json({
       success: false,
-      error: 'Внутренняя ошибка сервера',
+      error: 'Ошибка обновления товара',
       details: error instanceof Error ? error.message : 'Неизвестная ошибка'
     }, { status: 500 });
-  } finally {
-    await prisma.$disconnect();
   }
 }
