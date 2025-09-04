@@ -607,7 +607,9 @@ export default function Step4Results({
             <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <p className="text-gray-400 mb-4">
               {showOnlyFilled && stats.filled === 0 
-                ? 'Нет заполненных характеристик - ИИ не смог определить значения автоматически' 
+                ? stats.total > 0 
+                  ? 'Нет заполненных характеристик - товар не прошел ИИ-анализ. Все поля доступны для ручного заполнения.' 
+                  : 'Нет заполненных характеристик - ИИ не смог определить значения автоматически'
                 : 'Характеристики не загружены'
               }
             </p>
@@ -636,9 +638,28 @@ export default function Step4Results({
         <div className="bg-blue-900/20 border border-blue-500/30 rounded-xl p-4">
           <h4 className="text-white font-medium mb-3 flex items-center gap-2">
             <Lightbulb className="w-4 h-4 text-blue-400" />
-            Рекомендации по улучшению карточки товара:
+            {stats.filled === 0 && stats.total > 0 
+              ? 'Товар не прошел ИИ-анализ - заполните характеристики вручную:'
+              : 'Рекомендации по улучшению карточки товара:'
+            }
           </h4>
           <ul className="text-sm text-blue-200 space-y-2">
+            {stats.filled === 0 && stats.total > 0 && (
+              <>
+                <li className="flex items-start gap-2">
+                  <span className="text-yellow-400 mt-0.5">•</span>
+                  <span>Нажмите "Показать все" чтобы увидеть все {stats.total} характеристик категории</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-blue-400 mt-0.5">•</span>
+                  <span>Используйте кнопку ✏️ для редактирования каждой характеристики</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-400 mt-0.5">•</span>
+                  <span>Заполните хотя бы основные характеристики: модель, мощность, гарантийный срок</span>
+                </li>
+              </>
+            )}
             {stats.fillRate < 50 && (
               <li className="flex items-start gap-2">
                 <span className="text-yellow-400 mt-0.5">•</span>

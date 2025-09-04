@@ -90,7 +90,8 @@ export async function GET(
         console.log('📄 [Characteristics API] Сырые данные:', product.aiCharacteristics?.toString().substring(0, 200));
       }
     } else {
-      console.log('⚠️ [Characteristics API] aiCharacteristics пустые или отсутствуют');
+      console.log('⚠️ [Characteristics API] aiCharacteristics пустые или отсутствуют - товар не прошел ИИ-анализ');
+      console.log('📋 [Characteristics API] Все характеристики будут показаны как пустые для ручного заполнения');
     }
 
     // Получение характеристик категории
