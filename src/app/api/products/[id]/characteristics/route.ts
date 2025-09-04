@@ -96,6 +96,9 @@ export async function GET(
     // Получение характеристик категории
     const categoryCharacteristics = product.subcategory?.characteristics || [];
     console.log(`📋 [Characteristics API] Характеристик в категории: ${categoryCharacteristics.length}`);
+    console.log(`📋 [Characteristics API] Список характеристик категории:`, 
+      categoryCharacteristics.map(c => `${c.name} (ID: ${c.wbCharacteristicId || c.id})`).join(', ')
+    );
 
     // Создание карты ИИ характеристик для быстрого поиска
     const aiCharMap = new Map();
@@ -190,20 +193,20 @@ export async function GET(
         console.log(`❌ [Characteristics API] AI данные не найдены для: ${categoryChar.name} (ID: ${charId})`);
       }
 
-      // Специальные категории
-      const MANUAL_INPUT_IDS = new Set([89008, 90630, 90607, 90608, 90652, 90653, 11002, 90654, 90655]);
+      // Специальные категории характеристик
+      const MANUAL_INPUT_IDS = new Set([89008, 90630, 90607, 90608, 90652, 90653, 11002, 90654, 90655, 90673]);
       const PROTECTED_USER_IDS = new Set([14177441, 378533, 14177449]);
-      const DECLARATION_IDS = new Set([14177472, 14177473, 14177474, 74941, 15001135, 15001136]);
+      const DECLARATION_IDS = new Set([14177472, 14177473, 14177474, 74941, 15001135, 15001136, 15001137, 15001138, 15001405, 15001650, 15001706]);
 
       if (DECLARATION_IDS.has(charId)) {
         category = 'declaration';
-        reasoning = 'НДС/Декларационные данные';
+        reasoning = 'НДС/Декларационные данные - заполняется отдельно';
       } else if (MANUAL_INPUT_IDS.has(charId)) {
         category = 'manual_required';
-        reasoning = 'Требует ручного ввода';
+        reasoning = 'Размеры/габариты - требует ручного ввода';
       } else if (PROTECTED_USER_IDS.has(charId)) {
         category = 'user_protected';
-        reasoning = 'Защищенные данные';
+        reasoning = 'Цвет/комплектация - защищенные данные';
       }
 
       const result = {
@@ -231,7 +234,7 @@ export async function GET(
         
         // Флаги для интерфейса
         showInUI: true,
-        isEditable: category === 'ai_filled'
+        isEditable: category !== 'declaration' // Все кроме декларационных можно редактировать
       };
 
       console.log(`📝 [Characteristics API] Результат обработки ${categoryChar.name}:`, {
