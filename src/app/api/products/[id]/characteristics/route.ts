@@ -133,7 +133,9 @@ export async function GET(
 
     console.log(`📊 [Characteristics API] Создана карта AI характеристик: ${aiCharMap.size} записей`);
 
-    // ГЛАВНОЕ ИСПРАВЛЕНИЕ: Правильное объединение данных
+    // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Обрабатываем ВСЕ характеристики категории, а не только те что в ИИ
+    console.log(`🔍 [Characteristics API] Обрабатываем ВСЕ характеристики категории: ${categoryCharacteristics.length}`);
+    
     const processedCharacteristics = categoryCharacteristics.map((categoryChar: any) => {
       const charId = categoryChar.wbCharacteristicId || categoryChar.id;
       const charName = categoryChar.name?.toLowerCase().trim();
@@ -190,7 +192,12 @@ export async function GET(
           console.log(`⚠️ [Characteristics API] AI характеристика найдена, но значение пустое: ${categoryChar.name}`);
         }
       } else {
-        console.log(`❌ [Characteristics API] AI данные не найдены для: ${categoryChar.name} (ID: ${charId})`);
+        console.log(`❌ [Characteristics API] AI данные не найдены для: ${categoryChar.name} (ID: ${charId}) - будет отображена как пустая`);
+        // Устанавливаем значения по умолчанию для незаполненных характеристик
+        isFilled = false;
+        value = '';
+        confidence = 0;
+        reasoning = 'Не заполнено ИИ - доступно для ручного редактирования';
       }
 
       // Специальные категории характеристик
@@ -198,6 +205,7 @@ export async function GET(
       const PROTECTED_USER_IDS = new Set([14177441, 378533, 14177449]);
       const DECLARATION_IDS = new Set([14177472, 14177473, 14177474, 74941, 15001135, 15001136, 15001137, 15001138, 15001405, 15001650, 15001706]);
 
+      // Определяем категорию характеристики
       if (DECLARATION_IDS.has(charId)) {
         category = 'declaration';
         reasoning = 'НДС/Декларационные данные - заполняется отдельно';
@@ -207,6 +215,10 @@ export async function GET(
       } else if (PROTECTED_USER_IDS.has(charId)) {
         category = 'user_protected';
         reasoning = 'Цвет/комплектация - защищенные данные';
+      } else if (!isFilled) {
+        // Если не заполнено ИИ и не относится к специальным категориям
+        category = 'ai_filled'; // Остается редактируемой
+        reasoning = 'Не заполнено ИИ - доступно для ручного редактирования';
       }
 
       const result = {
@@ -246,8 +258,9 @@ export async function GET(
       return result;
     });
 
-    // Статистика
+    // Статистика с подробным анализом
     const filledCount = processedCharacteristics.filter(c => c.isFilled).length;
+    const emptyCount = processedCharacteristics.filter(c => !c.isFilled).length;
     const fillRate = processedCharacteristics.length > 0 
       ? Math.round((filledCount / processedCharacteristics.length) * 100) 
       : 0;
@@ -255,6 +268,7 @@ export async function GET(
     const stats = {
       total: processedCharacteristics.length,
       filled: filledCount,
+      empty: emptyCount,
       required: processedCharacteristics.filter(c => c.isRequired).length,
       aiFilled: processedCharacteristics.filter(c => c.category === 'ai_filled' && c.isFilled).length,
       manualRequired: processedCharacteristics.filter(c => c.category === 'manual_required').length,
@@ -264,6 +278,12 @@ export async function GET(
     };
 
     console.log(`📊 [Characteristics API] Финальная статистика:`, stats);
+    console.log(`📋 [Characteristics API] Пустые характеристики (${emptyCount}):`, 
+      processedCharacteristics.filter(c => !c.isFilled).map(c => c.name).join(', ')
+    );
+    console.log(`📋 [Characteristics API] Заполненные характеристики (${filledCount}):`, 
+      processedCharacteristics.filter(c => c.isFilled).map(c => c.name).join(', ')
+    );
 
     // Формирование ответа
     return NextResponse.json({

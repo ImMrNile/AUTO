@@ -361,6 +361,9 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
         }
         
         console.log('Состояние обновлено из БД');
+        console.log(`📊 Загружено характеристик: ${data.characteristics.length}`);
+        console.log(`📊 Заполненных: ${data.stats?.filled || 0}`);
+        console.log(`📊 Пустых: ${data.stats?.empty || 0}`);
       }
     } catch (error) {
       console.error('Ошибка загрузки характеристик из БД:', error);
@@ -369,6 +372,74 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
     }
   };
   
+  // Новая функция для загрузки всех характеристик категории
+  const loadAllCategoryCharacteristics = async (categoryId: number) => {
+    console.log('🔄 Загружаем ВСЕ характеристики категории:', categoryId);
+    setIsLoadingCharacteristics(true);
+    
+    try {
+      const response = await fetch(`/api/wb/characteristics/${categoryId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      console.log('📋 Получены характеристики категории:', {
+        success: data.success,
+        characteristicsCount: data.characteristics?.length,
+        categoryName: data.categoryName
+      });
+      
+      if (data.success && data.characteristics) {
+        // Объединяем с существующими ИИ-данными
+        const existingAiData = new Map();
+        aiCharacteristics.forEach(char => {
+          existingAiData.set(char.id, char);
+        });
+        
+        // Создаем полный список характеристик
+        const fullCharacteristics = data.characteristics.map((categoryChar: any) => {
+          const existingData = existingAiData.get(categoryChar.wbCharacteristicId || categoryChar.id);
+          
+          return {
+            id: categoryChar.wbCharacteristicId || categoryChar.id,
+            name: categoryChar.name,
+            value: existingData?.value || '',
+            confidence: existingData?.confidence || 0,
+            reasoning: existingData?.reasoning || 'Не заполнено - доступно для редактирования',
+            type: categoryChar.type || 'string',
+            isRequired: categoryChar.isRequired || false,
+            isFilled: !!(existingData?.value && String(existingData.value).trim() !== ''),
+            category: existingData?.category || 'ai_filled',
+            source: existingData?.source || 'not_filled',
+            possibleValues: (categoryChar.values || []).map((v: any) => ({
+              id: v.wbValueId || v.id,
+              value: v.value,
+              displayName: v.displayName || v.value
+            })),
+            maxLength: categoryChar.maxLength,
+            minValue: categoryChar.minValue,
+            maxValue: categoryChar.maxValue,
+            description: categoryChar.description,
+            isEditable: true
+          };
+        });
+        
+        console.log(`📊 Создан полный список характеристик: ${fullCharacteristics.length}`);
+        console.log(`📊 Из них заполнено: ${fullCharacteristics.filter(c => c.isFilled).length}`);
+        
+        setAiCharacteristics(fullCharacteristics);
+        setAllCategoryCharacteristics(data.characteristics);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки характеристик категории:', error);
+    } finally {
+      setIsLoadingCharacteristics(false);
+    }
+  };
+
   const handleCharacteristicUpdate = async (characteristicId: number, newValue: string) => {
     console.log('Обновление характеристики:', { characteristicId, newValue });
     
@@ -720,6 +791,10 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
           setSuccess(`Товар "${formData.name}" создан. ИИ заполнил ${filledCount}/${processedCharacteristics.length} характеристик (${fillRate}%). Проверьте данные и нажмите "Опубликовать".`);
           setCurrentStep(4);
           setIsSubmitting(false);
+          
+          // 🔥 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: ВСЕГДА загружаем полный список характеристик
+          console.log('🔄 Принудительная загрузка ВСЕХ характеристик категории из API...');
+          await loadProductCharacteristics(result.productId);
           
           if (onSuccess) onSuccess();
           
@@ -1318,6 +1393,7 @@ const handlePublishToWildberries = async () => {
                 }}
                 onClearForm={clearForm}
                 onLoadProductCharacteristics={loadProductCharacteristics}
+                onLoadAllCategoryCharacteristics={loadAllCategoryCharacteristics}
                 
                 // НОВЫЕ ПРОПСЫ: Состояние данных
                 hasPendingData={!!previewData && !isDataSaved}

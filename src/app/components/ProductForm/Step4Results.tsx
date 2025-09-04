@@ -67,6 +67,7 @@ interface Step4ResultsProps {
   onCreateInfographic: () => void;
   onClearForm: () => void;
   onLoadProductCharacteristics: (productId: string) => void;
+  onLoadAllCategoryCharacteristics?: (categoryId: number) => void;
   onCharacteristicUpdate?: (characteristicId: number, newValue: string) => void;
   hasPendingData?: boolean;
   isPublished?: boolean;
@@ -299,6 +300,7 @@ export default function Step4Results({
   onCreateInfographic,
   onClearForm,
   onLoadProductCharacteristics,
+  onLoadAllCategoryCharacteristics,
   onCharacteristicUpdate,
   hasPendingData = false,
   isPublished = false,
@@ -533,6 +535,17 @@ export default function Step4Results({
                 >
                   💡 Помощь
                 </button>
+                
+                {/* Кнопка для загрузки всех характеристик категории */}
+                {onLoadAllCategoryCharacteristics && aiResponse?.category?.id && (
+                  <button
+                    onClick={() => onLoadAllCategoryCharacteristics(aiResponse.category.id)}
+                    className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
+                    title="Загрузить все характеристики категории"
+                  >
+                    📋 Все поля
+                  </button>
+                )}
               </>
             )}
             
