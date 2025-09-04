@@ -277,12 +277,6 @@ export async function POST(
       
       const categoryHasSizes = await hasSizeCharacteristics(product.subcategoryId);
       console.log(`🏷️ [Debug] Product subcategoryId: ${product.subcategoryId}`);
-      console.log(`🏷️ [Debug] Product subcategory:`, product.subcategory);
-      console.log(`🏷️ [Debug] wbSubjectId from subcategory: ${product.subcategory?.wbSubjectId}`);
-
-      const correctSubjectId = product.subcategory?.wbSubjectId || product.subcategoryId;
-      console.log(`🏷️ [Debug] Final subjectID will be: ${correctSubjectId}`);
-
       // Также добавить проверку фото:
       console.log(`📷 [Debug] Original image: ${product.originalImage}`);
 
@@ -291,6 +285,7 @@ export async function POST(
         select: { 
           id: true, 
           name: true,
+          wbSubjectId: true, // 🔥 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: добавляем wbSubjectId
           parentCategory: {
             select: { id: true, name: true }
           }
@@ -298,6 +293,10 @@ export async function POST(
       });
 
       console.log(`🏷️ [Debug] Category info:`, categoryInfo);
+      
+      // 🔥 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Логирование правильного subjectID
+      const correctSubjectId = categoryInfo?.wbSubjectId || product.subcategoryId;
+      console.log(`🎯 [Debug] Using subjectID: ${correctSubjectId} (wbSubjectId: ${categoryInfo?.wbSubjectId}, fallback: ${product.subcategoryId})`);
       
       // Генерация кодов
       const vendorCode = `PRD${product.id.slice(-8).toUpperCase()}`;
@@ -339,7 +338,7 @@ export async function POST(
 
       // ИСПРАВЛЕННАЯ структура для WB API v2
       const wbProductData = {
-        subjectID: product.subcategoryId,
+        subjectID: correctSubjectId, // 🔥 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: используем wbSubjectId
         variants: [{
           vendorCode: vendorCode,
           title: seoTitle.substring(0, 60),
