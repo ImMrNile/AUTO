@@ -462,17 +462,45 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
       
       if (data.success && data.characteristics) {
         console.log(`📋 Получено ${data.characteristics.length} характеристик категории для объединения`);
+        console.log('🔍 Структура ИИ-данных:', aiCharacteristics.map(ai => `${ai.name} (ID: ${ai.id})`).join(', '));
+        console.log('🔍 Структура категории:', data.characteristics.map(cat => `${cat.name} (ID: ${cat.wbCharacteristicId || cat.id})`).join(', '));
         
         // Создаем карту ИИ-данных для быстрого поиска
         const aiCharMap = new Map();
         aiCharacteristics.forEach(aiChar => {
-          aiCharMap.set(aiChar.id, aiChar);
+          // Используем разные варианты ID для поиска
+          const possibleIds = [
+            aiChar.id,
+            aiChar.characteristicId,
+            aiChar.wbCharacteristicId
+          ].filter(id => id !== undefined && id !== null);
+          
+          possibleIds.forEach(id => {
+            aiCharMap.set(Number(id), aiChar);
+          });
+          
+          console.log(`🔍 Добавляем в карту ИИ характеристику: ${aiChar.name} с ID: ${possibleIds.join(', ')}`);
         });
         
         // Объединяем данные: берем полный список категории и заполняем ИИ-данными где есть
         const mergedCharacteristics = data.characteristics.map((categoryChar: any) => {
           const charId = categoryChar.wbCharacteristicId || categoryChar.id;
-          const aiChar = aiCharMap.get(charId);
+          
+          // Ищем ИИ-данные по разным вариантам ID
+          let aiChar = aiCharMap.get(Number(charId));
+          
+          // Если не найдено по ID, ищем по имени
+          if (!aiChar) {
+            aiChar = aiCharacteristics.find(ai => 
+              ai.name && categoryChar.name && 
+              ai.name.toLowerCase().trim() === categoryChar.name.toLowerCase().trim()
+            );
+            if (aiChar) {
+              console.log(`✅ Найдено совпадение по имени: "${categoryChar.name}"`);
+            }
+          }
+          
+          console.log(`🔍 Обрабатываем категорийную характеристику: ${categoryChar.name} (ID: ${charId}), найдены ИИ-данные: ${!!aiChar}`);
           
           if (aiChar) {
             // Если есть ИИ-данные - используем их
