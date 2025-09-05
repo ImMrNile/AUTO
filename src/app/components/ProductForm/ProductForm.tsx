@@ -446,7 +446,13 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
     setIsLoadingCharacteristics(true);
     
     try {
-      const response = await fetch(`/api/products/${productId}/characteristics`);
+      // Используем существующий API для загрузки характеристик категории
+      const categoryId = selectedCategory?.id;
+      if (!categoryId) {
+        throw new Error('Category ID not found');
+      }
+      
+      const response = await fetch(`/api/wb/characteristics/${categoryId}`);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -465,22 +471,57 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
         
         // Объединяем данные: берем полный список категории и заполняем ИИ-данными где есть
         const mergedCharacteristics = data.characteristics.map((categoryChar: any) => {
-          const aiChar = aiCharMap.get(categoryChar.id);
+          const charId = categoryChar.wbCharacteristicId || categoryChar.id;
+          const aiChar = aiCharMap.get(charId);
           
           if (aiChar) {
             // Если есть ИИ-данные - используем их
             return {
-              ...categoryChar,
+              id: charId,
+              name: categoryChar.name,
               value: aiChar.value,
               isFilled: aiChar.isFilled,
               confidence: aiChar.confidence,
               reasoning: aiChar.reasoning,
+              type: categoryChar.type || 'string',
+              isRequired: categoryChar.isRequired || false,
               category: 'ai_filled',
-              source: 'ai_analysis'
+              source: 'ai_analysis',
+              possibleValues: (categoryChar.values || []).map((v: any) => ({
+                id: v.wbValueId || v.id,
+                value: v.value,
+                displayName: v.displayName || v.value
+              })),
+              maxLength: categoryChar.maxLength,
+              minValue: categoryChar.minValue,
+              maxValue: categoryChar.maxValue,
+              description: categoryChar.description,
+              isEditable: true
             };
           } else {
-            // Если нет ИИ-данных - оставляем пустой характеристикой
-            return categoryChar;
+            // Если нет ИИ-данных - создаем пустую характеристику
+            return {
+              id: charId,
+              name: categoryChar.name,
+              value: '',
+              isFilled: false,
+              confidence: 0,
+              reasoning: 'Не заполнено ИИ - доступно для ручного редактирования',
+              type: categoryChar.type || 'string',
+              isRequired: categoryChar.isRequired || false,
+              category: 'ai_filled',
+              source: 'not_filled',
+              possibleValues: (categoryChar.values || []).map((v: any) => ({
+                id: v.wbValueId || v.id,
+                value: v.value,
+                displayName: v.displayName || v.value
+              })),
+              maxLength: categoryChar.maxLength,
+              minValue: categoryChar.minValue,
+              maxValue: categoryChar.maxValue,
+              description: categoryChar.description,
+              isEditable: true
+            };
           }
         });
         
@@ -488,7 +529,7 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
         console.log(`📊 Из них заполнено ИИ: ${mergedCharacteristics.filter(c => c.isFilled).length}`);
         
         setAiCharacteristics(mergedCharacteristics);
-        setAllCategoryCharacteristics(data.allCategoryCharacteristics || []);
+        setAllCategoryCharacteristics(data.characteristics || []);
       }
     } catch (error) {
       console.error('Ошибка объединения ИИ-данных с характеристиками категории:', error);
