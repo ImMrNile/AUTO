@@ -64,11 +64,14 @@ export async function GET(
     let aiCharacteristics: any[] = [];
     let aiData: any = null;
     
-    if (product.aiCharacteristics) {
+    // 🔥 ИСПРАВЛЕНИЕ: Проверяем как aiCharacteristics, так и aiPreview
+    const aiSource = product.aiCharacteristics || product.aiPreview;
+    
+    if (aiSource) {
       try {
-        aiData = typeof product.aiCharacteristics === 'string' 
-          ? JSON.parse(product.aiCharacteristics) 
-          : product.aiCharacteristics;
+        aiData = typeof aiSource === 'string' 
+          ? JSON.parse(aiSource) 
+          : aiSource;
         
         console.log('🔍 [Characteristics API] Структура AI данных:', Object.keys(aiData));
         
