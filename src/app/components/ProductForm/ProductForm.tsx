@@ -440,6 +440,65 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
     }
   };
 
+  // Новая функция для объединения ИИ-данных с полным списком характеристик
+  const mergeAIDataWithCategoryCharacteristics = async (productId: string, aiCharacteristics: any[]) => {
+    console.log('🔄 Загружаем полный список характеристик категории для объединения с ИИ-данными...');
+    setIsLoadingCharacteristics(true);
+    
+    try {
+      const response = await fetch(`/api/products/${productId}/characteristics`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && data.characteristics) {
+        console.log(`📋 Получено ${data.characteristics.length} характеристик категории для объединения`);
+        
+        // Создаем карту ИИ-данных для быстрого поиска
+        const aiCharMap = new Map();
+        aiCharacteristics.forEach(aiChar => {
+          aiCharMap.set(aiChar.id, aiChar);
+        });
+        
+        // Объединяем данные: берем полный список категории и заполняем ИИ-данными где есть
+        const mergedCharacteristics = data.characteristics.map((categoryChar: any) => {
+          const aiChar = aiCharMap.get(categoryChar.id);
+          
+          if (aiChar) {
+            // Если есть ИИ-данные - используем их
+            return {
+              ...categoryChar,
+              value: aiChar.value,
+              isFilled: aiChar.isFilled,
+              confidence: aiChar.confidence,
+              reasoning: aiChar.reasoning,
+              category: 'ai_filled',
+              source: 'ai_analysis'
+            };
+          } else {
+            // Если нет ИИ-данных - оставляем пустой характеристикой
+            return categoryChar;
+          }
+        });
+        
+        console.log(`📊 Объединено характеристик: ${mergedCharacteristics.length}`);
+        console.log(`📊 Из них заполнено ИИ: ${mergedCharacteristics.filter(c => c.isFilled).length}`);
+        
+        setAiCharacteristics(mergedCharacteristics);
+        setAllCategoryCharacteristics(data.allCategoryCharacteristics || []);
+      }
+    } catch (error) {
+      console.error('Ошибка объединения ИИ-данных с характеристиками категории:', error);
+      // Fallback: используем только ИИ-данные
+      setAiCharacteristics(aiCharacteristics);
+    } finally {
+      setIsLoadingCharacteristics(false);
+    }
+  };
+
   const handleCharacteristicUpdate = async (characteristicId: number, newValue: string) => {
     console.log('Обновление характеристики:', { characteristicId, newValue });
     
@@ -792,9 +851,9 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
           setCurrentStep(4);
           setIsSubmitting(false);
           
-          // 🔥 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: ВСЕГДА загружаем полный список характеристик
-          console.log('🔄 Принудительная загрузка ВСЕХ характеристик категории из API...');
-          await loadProductCharacteristics(result.productId);
+          // 🔥 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Объединяем ИИ-данные с полным списком характеристик
+          console.log('🔄 Объединяем ИИ-данные с полным списком характеристик категории...');
+          await mergeAIDataWithCategoryCharacteristics(result.productId, processedCharacteristics);
           
           if (onSuccess) onSuccess();
           
