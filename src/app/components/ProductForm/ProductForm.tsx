@@ -201,13 +201,13 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
     }
   }, [formData.autoGenerateVendorCode, formData.name]);
 
-  // Загружаем характеристики только если данные НЕ сохранены
+  // Загружаем характеристики только если данные НЕ сохранены И нет previewData
   useEffect(() => {
-    if (createdProductId && aiCharacteristics.length === 0 && !isLoadingCharacteristics && !isDataSaved) {
+    if (createdProductId && aiCharacteristics.length === 0 && !isLoadingCharacteristics && !isDataSaved && !previewData) {
       console.log('Автозагрузка характеристик для товара:', createdProductId);
       loadProductCharacteristics(createdProductId);
     }
-  }, [createdProductId, aiCharacteristics.length, isLoadingCharacteristics, isDataSaved]);
+  }, [createdProductId, aiCharacteristics.length, isLoadingCharacteristics, isDataSaved, previewData]);
 
   useEffect(() => {
     if (aiAnalysisStatus === 'completed' && processingStatus && processingStatus.stage !== 'completed') {
@@ -895,6 +895,11 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
           });
   
           // Устанавливаем данные для отображения в UI
+          console.log('🔥 Устанавливаем ИИ-характеристики в состояние:', {
+            count: processedCharacteristics.length,
+            filled: processedCharacteristics.filter(c => c.isFilled).length,
+            sample: processedCharacteristics.slice(0, 3).map(c => `${c.name}: ${c.value} (filled: ${c.isFilled})`)
+          });
           setAiCharacteristics(processedCharacteristics);
           setAiResponse({
             generatedName: aiPreview.seoTitle || formData.name,
@@ -920,8 +925,11 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
           setCurrentStep(4);
           setIsSubmitting(false);
           
-          // 🔥 ИСПРАВЛЕНИЕ: Используем ИИ-данные как есть, пользователь может загрузить дополнительные характеристики кнопкой
-          console.log('✅ Используем ИИ-данные как есть. Дополнительные характеристики можно загрузить кнопкой "📋 Все поля"');
+          // 🔥 ИСПРАВЛЕНИЕ: Используем ИИ-данные как есть, НЕ объединяем с категорией
+          console.log('✅ Используем ИИ-данные как есть:', {
+            total: processedCharacteristics.length,
+            filled: processedCharacteristics.filter(c => c.isFilled).length
+          });
           
           if (onSuccess) onSuccess();
           
