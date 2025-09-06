@@ -428,7 +428,7 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
         });
         
         console.log(`📊 Создан полный список характеристик: ${fullCharacteristics.length}`);
-        console.log(`📊 Из них заполнено: ${fullCharacteristics.filter(c => c.isFilled).length}`);
+        console.log(`📊 Из них заполнено: ${fullCharacteristics.filter((c: any) => c.isFilled).length}`);
         
         setAiCharacteristics(fullCharacteristics);
         setAllCategoryCharacteristics(data.characteristics);
@@ -897,8 +897,8 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
           // Устанавливаем данные для отображения в UI
           console.log('🔥 Устанавливаем ИИ-характеристики в состояние:', {
             count: processedCharacteristics.length,
-            filled: processedCharacteristics.filter(c => c.isFilled).length,
-            sample: processedCharacteristics.slice(0, 3).map(c => `${c.name}: ${c.value} (filled: ${c.isFilled})`)
+            filled: processedCharacteristics.filter((c: any) => c.isFilled).length,
+            sample: processedCharacteristics.slice(0, 3).map((c: any) => `${c.name}: ${c.value} (filled: ${c.isFilled})`)
           });
           setAiCharacteristics(processedCharacteristics);
           setAiResponse({
@@ -928,7 +928,7 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
           // 🔥 ИСПРАВЛЕНИЕ: Используем ИИ-данные как есть, НЕ объединяем с категорией
           console.log('✅ Используем ИИ-данные как есть:', {
             total: processedCharacteristics.length,
-            filled: processedCharacteristics.filter(c => c.isFilled).length
+            filled: processedCharacteristics.filter((c: any) => c.isFilled).length
           });
           
           if (onSuccess) onSuccess();
