@@ -201,13 +201,13 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
     }
   }, [formData.autoGenerateVendorCode, formData.name]);
 
-  // Загружаем характеристики только если данные НЕ сохранены
+  // Загружаем характеристики только если данные НЕ сохранены И нет previewData
   useEffect(() => {
-    if (createdProductId && aiCharacteristics.length === 0 && !isLoadingCharacteristics && !isDataSaved) {
+    if (createdProductId && aiCharacteristics.length === 0 && !isLoadingCharacteristics && !isDataSaved && !previewData) {
       console.log('Автозагрузка характеристик для товара:', createdProductId);
       loadProductCharacteristics(createdProductId);
     }
-  }, [createdProductId, aiCharacteristics.length, isLoadingCharacteristics, isDataSaved]);
+  }, [createdProductId, aiCharacteristics.length, isLoadingCharacteristics, isDataSaved, previewData]);
 
   useEffect(() => {
     if (aiAnalysisStatus === 'completed' && processingStatus && processingStatus.stage !== 'completed') {
@@ -361,6 +361,9 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
         }
         
         console.log('Состояние обновлено из БД');
+        console.log(`📊 Загружено характеристик: ${data.characteristics.length}`);
+        console.log(`📊 Заполненных: ${data.stats?.filled || 0}`);
+        console.log(`📊 Пустых: ${data.stats?.empty || 0}`);
       }
     } catch (error) {
       console.error('Ошибка загрузки характеристик из БД:', error);
@@ -369,6 +372,202 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
     }
   };
   
+  // Новая функция для загрузки всех характеристик категории
+  const loadAllCategoryCharacteristics = async (categoryId: number) => {
+    console.log('🔄 Загружаем ВСЕ характеристики категории:', categoryId);
+    setIsLoadingCharacteristics(true);
+    
+    try {
+      const response = await fetch(`/api/wb/characteristics/${categoryId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      console.log('📋 Получены характеристики категории:', {
+        success: data.success,
+        characteristicsCount: data.characteristics?.length,
+        categoryName: data.categoryName
+      });
+      
+      if (data.success && data.characteristics) {
+        // Объединяем с существующими ИИ-данными
+        const existingAiData = new Map();
+        aiCharacteristics.forEach(char => {
+          existingAiData.set(char.id, char);
+        });
+        
+        // Создаем полный список характеристик
+        const fullCharacteristics = data.characteristics.map((categoryChar: any) => {
+          const existingData = existingAiData.get(categoryChar.wbCharacteristicId || categoryChar.id);
+          
+          return {
+            id: categoryChar.wbCharacteristicId || categoryChar.id,
+            name: categoryChar.name,
+            value: existingData?.value || '',
+            confidence: existingData?.confidence || 0,
+            reasoning: existingData?.reasoning || 'Не заполнено - доступно для редактирования',
+            type: categoryChar.type || 'string',
+            isRequired: categoryChar.isRequired || false,
+            isFilled: !!(existingData?.value && String(existingData.value).trim() !== ''),
+            category: existingData?.category || 'ai_filled',
+            source: existingData?.source || 'not_filled',
+            possibleValues: (categoryChar.values || []).map((v: any) => ({
+              id: v.wbValueId || v.id,
+              value: v.value,
+              displayName: v.displayName || v.value
+            })),
+            maxLength: categoryChar.maxLength,
+            minValue: categoryChar.minValue,
+            maxValue: categoryChar.maxValue,
+            description: categoryChar.description,
+            isEditable: true
+          };
+        });
+        
+        console.log(`📊 Создан полный список характеристик: ${fullCharacteristics.length}`);
+        console.log(`📊 Из них заполнено: ${fullCharacteristics.filter((c: any) => c.isFilled).length}`);
+        
+        setAiCharacteristics(fullCharacteristics);
+        setAllCategoryCharacteristics(data.characteristics);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки характеристик категории:', error);
+    } finally {
+      setIsLoadingCharacteristics(false);
+    }
+  };
+
+  // Новая функция для объединения ИИ-данных с полным списком характеристик
+  const mergeAIDataWithCategoryCharacteristics = async (productId: string, aiCharacteristics: any[]) => {
+    console.log('🔄 Загружаем полный список характеристик категории для объединения с ИИ-данными...');
+    setIsLoadingCharacteristics(true);
+    
+    try {
+      // Используем существующий API для загрузки характеристик категории
+      const categoryId = selectedCategory?.id;
+      if (!categoryId) {
+        throw new Error('Category ID not found');
+      }
+      
+      const response = await fetch(`/api/wb/characteristics/${categoryId}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success && data.characteristics) {
+        console.log(`📋 Получено ${data.characteristics.length} характеристик категории для объединения`);
+        console.log('🔍 Структура ИИ-данных:', aiCharacteristics.map(ai => `${ai.name} (ID: ${ai.id})`).join(', '));
+        console.log('🔍 Структура категории:', data.characteristics.map((cat: any) => `${cat.name} (ID: ${cat.wbCharacteristicId || cat.id})`).join(', '));
+        
+        // Создаем карту ИИ-данных для быстрого поиска
+        const aiCharMap = new Map();
+        aiCharacteristics.forEach(aiChar => {
+          // Используем разные варианты ID для поиска
+          const possibleIds = [
+            aiChar.id,
+            aiChar.characteristicId,
+            aiChar.wbCharacteristicId
+          ].filter(id => id !== undefined && id !== null);
+          
+          possibleIds.forEach(id => {
+            aiCharMap.set(Number(id), aiChar);
+          });
+          
+          console.log(`🔍 Добавляем в карту ИИ характеристику: ${aiChar.name} с ID: ${possibleIds.join(', ')}`);
+        });
+        
+        // Объединяем данные: берем полный список категории и заполняем ИИ-данными где есть
+        const mergedCharacteristics = data.characteristics.map((categoryChar: any) => {
+          const charId = categoryChar.wbCharacteristicId || categoryChar.id;
+          
+          // Ищем ИИ-данные по разным вариантам ID
+          let aiChar = aiCharMap.get(Number(charId));
+          
+          // Если не найдено по ID, ищем по имени
+          if (!aiChar) {
+            aiChar = aiCharacteristics.find(ai => 
+              ai.name && categoryChar.name && 
+              ai.name.toLowerCase().trim() === categoryChar.name.toLowerCase().trim()
+            );
+            if (aiChar) {
+              console.log(`✅ Найдено совпадение по имени: "${categoryChar.name}"`);
+            }
+          }
+          
+          console.log(`🔍 Обрабатываем категорийную характеристику: ${categoryChar.name} (ID: ${charId}), найдены ИИ-данные: ${!!aiChar}`);
+          
+          if (aiChar) {
+            // Если есть ИИ-данные - используем их
+            return {
+              id: charId,
+              name: categoryChar.name,
+              value: aiChar.value,
+              isFilled: aiChar.isFilled,
+              confidence: aiChar.confidence,
+              reasoning: aiChar.reasoning,
+              type: categoryChar.type || 'string',
+              isRequired: categoryChar.isRequired || false,
+              category: 'ai_filled',
+              source: 'ai_analysis',
+              possibleValues: (categoryChar.values || []).map((v: any) => ({
+                id: v.wbValueId || v.id,
+                value: v.value,
+                displayName: v.displayName || v.value
+              })),
+              maxLength: categoryChar.maxLength,
+              minValue: categoryChar.minValue,
+              maxValue: categoryChar.maxValue,
+              description: categoryChar.description,
+              isEditable: true
+            };
+          } else {
+            // Если нет ИИ-данных - создаем пустую характеристику
+            return {
+              id: charId,
+              name: categoryChar.name,
+              value: '',
+              isFilled: false,
+              confidence: 0,
+              reasoning: 'Не заполнено ИИ - доступно для ручного редактирования',
+              type: categoryChar.type || 'string',
+              isRequired: categoryChar.isRequired || false,
+              category: 'ai_filled',
+              source: 'not_filled',
+              possibleValues: (categoryChar.values || []).map((v: any) => ({
+                id: v.wbValueId || v.id,
+                value: v.value,
+                displayName: v.displayName || v.value
+              })),
+              maxLength: categoryChar.maxLength,
+              minValue: categoryChar.minValue,
+              maxValue: categoryChar.maxValue,
+              description: categoryChar.description,
+              isEditable: true
+            };
+          }
+        });
+        
+        console.log(`📊 Объединено характеристик: ${mergedCharacteristics.length}`);
+        console.log(`📊 Из них заполнено ИИ: ${mergedCharacteristics.filter((c: any) => c.isFilled).length}`);
+        
+        setAiCharacteristics(mergedCharacteristics);
+        setAllCategoryCharacteristics(data.characteristics || []);
+      }
+    } catch (error) {
+      console.error('Ошибка объединения ИИ-данных с характеристиками категории:', error);
+      // Fallback: используем только ИИ-данные
+      setAiCharacteristics(aiCharacteristics);
+    } finally {
+      setIsLoadingCharacteristics(false);
+    }
+  };
+
   const handleCharacteristicUpdate = async (characteristicId: number, newValue: string) => {
     console.log('Обновление характеристики:', { characteristicId, newValue });
     
@@ -696,6 +895,11 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
           });
   
           // Устанавливаем данные для отображения в UI
+          console.log('🔥 Устанавливаем ИИ-характеристики в состояние:', {
+            count: processedCharacteristics.length,
+            filled: processedCharacteristics.filter((c: any) => c.isFilled).length,
+            sample: processedCharacteristics.slice(0, 3).map((c: any) => `${c.name}: ${c.value} (filled: ${c.isFilled})`)
+          });
           setAiCharacteristics(processedCharacteristics);
           setAiResponse({
             generatedName: aiPreview.seoTitle || formData.name,
@@ -720,6 +924,12 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
           setSuccess(`Товар "${formData.name}" создан. ИИ заполнил ${filledCount}/${processedCharacteristics.length} характеристик (${fillRate}%). Проверьте данные и нажмите "Опубликовать".`);
           setCurrentStep(4);
           setIsSubmitting(false);
+          
+          // 🔥 ИСПРАВЛЕНИЕ: Используем ИИ-данные как есть, НЕ объединяем с категорией
+          console.log('✅ Используем ИИ-данные как есть:', {
+            total: processedCharacteristics.length,
+            filled: processedCharacteristics.filter((c: any) => c.isFilled).length
+          });
           
           if (onSuccess) onSuccess();
           
@@ -1318,6 +1528,7 @@ const handlePublishToWildberries = async () => {
                 }}
                 onClearForm={clearForm}
                 onLoadProductCharacteristics={loadProductCharacteristics}
+                onLoadAllCategoryCharacteristics={loadAllCategoryCharacteristics}
                 
                 // НОВЫЕ ПРОПСЫ: Состояние данных
                 hasPendingData={!!previewData && !isDataSaved}

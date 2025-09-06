@@ -67,6 +67,7 @@ interface Step4ResultsProps {
   onCreateInfographic: () => void;
   onClearForm: () => void;
   onLoadProductCharacteristics: (productId: string) => void;
+  onLoadAllCategoryCharacteristics?: (categoryId: number) => void;
   onCharacteristicUpdate?: (characteristicId: number, newValue: string) => void;
   hasPendingData?: boolean;
   isPublished?: boolean;
@@ -90,7 +91,11 @@ const CharacteristicItem = ({
   const [editValue, setEditValue] = useState(String(characteristic.value || ''));
 
   const getCategoryIcon = () => {
-    if (characteristic.category === 'user_protected') {
+    if (characteristic.category === 'declaration') {
+      return <FileText className="w-4 h-4 text-orange-400" />;
+    } else if (characteristic.category === 'manual_required') {
+      return <Wrench className="w-4 h-4 text-yellow-400" />;
+    } else if (characteristic.category === 'user_protected') {
       return <Lock className="w-4 h-4 text-blue-400" />;
     } else if (characteristic.isFilled) {
       return <CheckCircle className="w-4 h-4 text-green-400" />;
@@ -100,7 +105,11 @@ const CharacteristicItem = ({
   };
 
   const getCategoryColor = () => {
-    if (characteristic.category === 'user_protected') {
+    if (characteristic.category === 'declaration') {
+      return 'border-orange-500/30 bg-orange-900/10';
+    } else if (characteristic.category === 'manual_required') {
+      return 'border-yellow-500/30 bg-yellow-900/10';
+    } else if (characteristic.category === 'user_protected') {
       return 'border-blue-500/30 bg-blue-900/10';
     } else if (characteristic.isFilled) {
       return 'border-green-500/30 bg-green-900/10';
@@ -110,7 +119,11 @@ const CharacteristicItem = ({
   };
 
   const getCategoryLabel = () => {
-    if (characteristic.category === 'user_protected') {
+    if (characteristic.category === 'declaration') {
+      return 'Декларационная';
+    } else if (characteristic.category === 'manual_required') {
+      return 'Требует ввода';
+    } else if (characteristic.category === 'user_protected') {
       return 'Системная';
     } else if (characteristic.isFilled) {
       return 'Заполнено ИИ';
@@ -128,7 +141,11 @@ const CharacteristicItem = ({
             <span className="font-medium text-white text-sm">{characteristic.name}</span>
             
             <span className={`px-2 py-0.5 rounded text-xs ${
-              characteristic.category === 'user_protected'
+              characteristic.category === 'declaration'
+                ? 'bg-orange-900/30 text-orange-300'
+                : characteristic.category === 'manual_required'
+                ? 'bg-yellow-900/30 text-yellow-300'
+                : characteristic.category === 'user_protected'
                 ? 'bg-blue-900/30 text-blue-300'
                 : characteristic.isFilled 
                 ? 'bg-green-900/30 text-green-300' 
@@ -211,9 +228,21 @@ const CharacteristicItem = ({
                     {characteristic.value}
                   </span>
                 ) : (
-                  <span className="text-gray-400 italic">
-                    Можно заполнить для улучшения карточки товара
-                  </span>
+                  <div className="space-y-1">
+                    <span className="text-gray-400 italic">
+                      {characteristic.category === 'manual_required' 
+                        ? 'Требует ручного ввода - нажмите ✏️ для заполнения'
+                        : characteristic.category === 'user_protected'
+                        ? 'Системная характеристика - нажмите ✏️ для редактирования'
+                        : 'Не заполнено ИИ - нажмите ✏️ для добавления значения'
+                      }
+                    </span>
+                    {characteristic.description && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        💡 {characteristic.description}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
               
@@ -240,7 +269,7 @@ const CharacteristicItem = ({
           )}
         </div>
 
-        {characteristic.isEditable !== false && !isEditing && (
+        {characteristic.isEditable !== false && characteristic.category !== 'declaration' && !isEditing && (
           <button
             onClick={onEdit}
             className="p-2 text-gray-400 hover:text-blue-400 hover:bg-blue-900/20 rounded transition-colors"
@@ -248,6 +277,12 @@ const CharacteristicItem = ({
           >
             <Edit3 className="w-4 h-4" />
           </button>
+        )}
+        
+        {characteristic.category === 'declaration' && (
+          <div className="p-2 text-orange-400" title="Декларационные данные заполняются отдельно">
+            <Lock className="w-4 h-4" />
+          </div>
         )}
       </div>
     </div>
@@ -265,6 +300,7 @@ export default function Step4Results({
   onCreateInfographic,
   onClearForm,
   onLoadProductCharacteristics,
+  onLoadAllCategoryCharacteristics,
   onCharacteristicUpdate,
   hasPendingData = false,
   isPublished = false,
@@ -447,12 +483,16 @@ export default function Step4Results({
                 <span className="text-green-300">Заполнено ИИ: {stats.editableFilled}</span>
               </div>
               <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded bg-yellow-500"></div>
+                <span className="text-yellow-300">Требуют ввода: {characteristics.filter(c => c.category === 'manual_required').length}</span>
+              </div>
+              <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded bg-blue-500"></div>
                 <span className="text-blue-300">Системных: {stats.system}</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded bg-red-500"></div>
-                <span className="text-red-300">Обязательных: {stats.requiredFilled}/{stats.required}</span>
+                <div className="w-3 h-3 rounded bg-orange-500"></div>
+                <span className="text-orange-300">Декларационных: {characteristics.filter(c => c.category === 'declaration').length}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded bg-gray-500"></div>
@@ -472,6 +512,42 @@ export default function Step4Results({
             >
               {showOnlyFilled ? 'Показать все' : 'Только заполненные'}
             </button>
+
+            {/* Кнопки управления характеристиками */}
+            {createdProductId && (
+              <>
+                <button
+                  onClick={() => onLoadProductCharacteristics && onLoadProductCharacteristics(createdProductId)}
+                  className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+                  title="Обновить список характеристик"
+                >
+                  🔄 Обновить
+                </button>
+                
+                <button
+                  onClick={() => {
+                    // Показать подсказку о заполнении характеристик
+                    const emptyCount = characteristics.filter(c => !c.isFilled && c.isEditable !== false).length;
+                    alert(`Найдено ${emptyCount} незаполненных характеристик. Нажмите кнопку "Показать все" чтобы увидеть их, затем используйте кнопку ✏️ для редактирования.`);
+                  }}
+                  className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
+                  title="Помощь по заполнению"
+                >
+                  💡 Помощь
+                </button>
+                
+                {/* Кнопка для загрузки всех характеристик категории */}
+                {onLoadAllCategoryCharacteristics && aiResponse?.category?.id && (
+                  <button
+                    onClick={() => onLoadAllCategoryCharacteristics(aiResponse.category.id)}
+                    className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
+                    title="Загрузить все характеристики категории"
+                  >
+                    📋 Все поля
+                  </button>
+                )}
+              </>
+            )}
             
             <button
               onClick={() => setShowSystemInfo(!showSystemInfo)}
@@ -531,7 +607,9 @@ export default function Step4Results({
             <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <p className="text-gray-400 mb-4">
               {showOnlyFilled && stats.filled === 0 
-                ? 'Нет заполненных характеристик - ИИ не смог определить значения автоматически' 
+                ? stats.total > 0 
+                  ? 'Нет заполненных характеристик - товар не прошел ИИ-анализ. Все поля доступны для ручного заполнения.' 
+                  : 'Нет заполненных характеристик - ИИ не смог определить значения автоматически'
                 : 'Характеристики не загружены'
               }
             </p>
@@ -560,9 +638,28 @@ export default function Step4Results({
         <div className="bg-blue-900/20 border border-blue-500/30 rounded-xl p-4">
           <h4 className="text-white font-medium mb-3 flex items-center gap-2">
             <Lightbulb className="w-4 h-4 text-blue-400" />
-            Рекомендации по улучшению карточки товара:
+            {stats.filled === 0 && stats.total > 0 
+              ? 'Товар не прошел ИИ-анализ - заполните характеристики вручную:'
+              : 'Рекомендации по улучшению карточки товара:'
+            }
           </h4>
           <ul className="text-sm text-blue-200 space-y-2">
+            {stats.filled === 0 && stats.total > 0 && (
+              <>
+                <li className="flex items-start gap-2">
+                  <span className="text-yellow-400 mt-0.5">•</span>
+                  <span>Нажмите "Показать все" чтобы увидеть все {stats.total} характеристик категории</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-blue-400 mt-0.5">•</span>
+                  <span>Используйте кнопку ✏️ для редактирования каждой характеристики</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-400 mt-0.5">•</span>
+                  <span>Заполните хотя бы основные характеристики: модель, мощность, гарантийный срок</span>
+                </li>
+              </>
+            )}
             {stats.fillRate < 50 && (
               <li className="flex items-start gap-2">
                 <span className="text-yellow-400 mt-0.5">•</span>

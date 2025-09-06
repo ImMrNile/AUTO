@@ -67,7 +67,9 @@ export async function POST(request: NextRequest) {
   let productId: string | undefined = undefined;
   
   try {
-    console.log('🚀 [Products API] Начало создания товара с размерной логикой');
+    console.log('🚀🚀🚀 [Products API] НОВАЯ ВЕРСИЯ API - Начало создания товара с размерной логикой 🚀🚀🚀');
+    console.log('📅 [Products API] Timestamp:', new Date().toISOString());
+    console.log('🔑 [Products API] OPENAI_API_KEY available:', !!process.env.OPENAI_API_KEY);
 
     // ЭТАП 1: Авторизация
     const user = await AuthService.getCurrentUser();
@@ -309,6 +311,14 @@ export async function POST(request: NextRequest) {
     let aiResult = null;
     let aiAnalysisStatus = 'failed';
     
+    console.log('🔍 [Products API] Подготовка к запуску ИИ-анализа...');
+    console.log('🔍 [Products API] aiInput:', JSON.stringify({
+      productName: aiInput.productName,
+      categoryId: aiInput.categoryId,
+      hasImages: aiInput.productImages.length > 0,
+      hasReference: !!aiInput.referenceUrl
+    }));
+    
     try {
       console.log('🤖 [Products API] Запуск ИИ анализа (предварительный)...');
       
@@ -329,6 +339,8 @@ export async function POST(request: NextRequest) {
       
     } catch (aiError) {
       console.error('❌ [Products API] Ошибка ИИ системы:', aiError);
+      console.error('❌ [Products API] Stack trace:', aiError instanceof Error ? aiError.stack : 'No stack trace');
+      console.error('❌ [Products API] Error message:', aiError instanceof Error ? aiError.message : String(aiError));
       aiAnalysisStatus = 'failed';
     }
 
