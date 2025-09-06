@@ -463,7 +463,7 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
       if (data.success && data.characteristics) {
         console.log(`📋 Получено ${data.characteristics.length} характеристик категории для объединения`);
         console.log('🔍 Структура ИИ-данных:', aiCharacteristics.map(ai => `${ai.name} (ID: ${ai.id})`).join(', '));
-        console.log('🔍 Структура категории:', data.characteristics.map(cat => `${cat.name} (ID: ${cat.wbCharacteristicId || cat.id})`).join(', '));
+        console.log('🔍 Структура категории:', data.characteristics.map((cat: any) => `${cat.name} (ID: ${cat.wbCharacteristicId || cat.id})`).join(', '));
         
         // Создаем карту ИИ-данных для быстрого поиска
         const aiCharMap = new Map();
@@ -554,7 +554,7 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
         });
         
         console.log(`📊 Объединено характеристик: ${mergedCharacteristics.length}`);
-        console.log(`📊 Из них заполнено ИИ: ${mergedCharacteristics.filter(c => c.isFilled).length}`);
+        console.log(`📊 Из них заполнено ИИ: ${mergedCharacteristics.filter((c: any) => c.isFilled).length}`);
         
         setAiCharacteristics(mergedCharacteristics);
         setAllCategoryCharacteristics(data.characteristics || []);
@@ -920,9 +920,8 @@ export default function ProductForm({ onSuccess }: ProductFormProps): JSX.Elemen
           setCurrentStep(4);
           setIsSubmitting(false);
           
-          // 🔥 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Объединяем ИИ-данные с полным списком характеристик
-          console.log('🔄 Объединяем ИИ-данные с полным списком характеристик категории...');
-          await mergeAIDataWithCategoryCharacteristics(result.productId, processedCharacteristics);
+          // 🔥 ИСПРАВЛЕНИЕ: Используем ИИ-данные как есть, пользователь может загрузить дополнительные характеристики кнопкой
+          console.log('✅ Используем ИИ-данные как есть. Дополнительные характеристики можно загрузить кнопкой "📋 Все поля"');
           
           if (onSuccess) onSuccess();
           
