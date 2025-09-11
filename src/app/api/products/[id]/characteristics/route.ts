@@ -4,6 +4,33 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma, safePrismaOperation } from '../../../../../../lib/prisma';
 import { AuthService } from '../../../../../../lib/auth/auth-service';
 
+// Функция для определения числовых характеристик
+function isNumericCharacteristic(name: string, id: number): boolean {
+  const numericKeywords = [
+    'длина', 'ширина', 'высота', 'глубина', 'вес', 'мощность', 'количество',
+    'размер', 'объем', 'скорость', 'температура', 'давление', 'напряжение',
+    'частота', 'диаметр', 'толщина', 'емкость', 'габарит'
+  ];
+  
+  const numericIds = new Set([
+    // Размеры и габариты
+    90607, 90608, 90652, 90653, 90654, 90655,
+    // Мощность и технические характеристики
+    89008, 90630, 11002,
+    // Количественные характеристики
+    // добавьте другие известные ID числовых характеристик
+  ]);
+  
+  // Проверка по ID
+  if (numericIds.has(id)) {
+    return true;
+  }
+  
+  // Проверка по названию
+  const nameLower = name.toLowerCase();
+  return numericKeywords.some(keyword => nameLower.includes(keyword));
+}
+
 // GET метод - получение характеристик товара с правильным парсингом AI данных
 export async function GET(
   request: NextRequest,
@@ -166,23 +193,39 @@ export async function GET(
       let confidence = 0;
       let reasoning = '';
 
-      // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Правильная обработка значений
+      // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Правильная обработка значений с типизацией
       if (aiChar) {
         console.log(`🔍 [Characteristics API] Найдены AI данные для ${categoryChar.name}:`, {
           value: aiChar.value,
           confidence: aiChar.confidence,
-          reasoning: aiChar.reasoning
+          reasoning: aiChar.reasoning,
+          type: categoryChar.type
         });
         
         const aiValue = aiChar.value;
         if (aiValue !== undefined && aiValue !== null && String(aiValue).trim() !== '' && String(aiValue) !== 'null') {
           isFilled = true;
-          value = String(aiValue);
+          
+          // Обработка типов данных
+          if (categoryChar.type === 'number' || isNumericCharacteristic(categoryChar.name, charId)) {
+            // Для числовых характеристик конвертируем в число
+            const numValue = parseFloat(String(aiValue).replace(/[^\d.,]/g, '').replace(',', '.'));
+            if (!isNaN(numValue)) {
+              value = numValue;
+              console.log(`🔢 [Characteristics API] Числовая характеристика: ${categoryChar.name} = ${value}`);
+            } else {
+              value = String(aiValue);
+              console.warn(`⚠️ [Characteristics API] Не удалось конвертировать в число: ${categoryChar.name} = "${aiValue}"`);
+            }
+          } else {
+            value = String(aiValue);
+          }
+          
           confidence = aiChar.confidence || 0.85;
           reasoning = aiChar.reasoning || 'Заполнено системой ИИ';
           category = 'ai_filled';
           
-          console.log(`✅ [Characteristics API] Характеристика заполнена: ${categoryChar.name} = "${value}"`);
+          console.log(`✅ [Characteristics API] Характеристика заполнена: ${categoryChar.name} = "${value}" (тип: ${typeof value})`);
         } else {
           console.log(`⚠️ [Characteristics API] AI характеристика найдена, но значение пустое: ${categoryChar.name}`);
         }
