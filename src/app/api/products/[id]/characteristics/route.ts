@@ -166,23 +166,40 @@ export async function GET(
       let confidence = 0;
       let reasoning = '';
 
-      // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Правильная обработка значений
+      // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Правильная обработка значений с типизацией
       if (aiChar) {
         console.log(`🔍 [Characteristics API] Найдены AI данные для ${categoryChar.name}:`, {
           value: aiChar.value,
           confidence: aiChar.confidence,
-          reasoning: aiChar.reasoning
+          reasoning: aiChar.reasoning,
+          type: categoryChar.type
         });
         
         const aiValue = aiChar.value;
         if (aiValue !== undefined && aiValue !== null && String(aiValue).trim() !== '' && String(aiValue) !== 'null') {
           isFilled = true;
-          value = String(aiValue);
+          
+          // Обработка типов данных на основе информации из БД
+          if (categoryChar.type === 'number' || categoryChar.type === 'integer' || categoryChar.type === 'float') {
+            // Для числовых характеристик конвертируем в число
+            const cleanValue = String(aiValue).replace(/[^\d.,\-]/g, '').replace(',', '.');
+            const numValue = parseFloat(cleanValue);
+            if (!isNaN(numValue) && isFinite(numValue)) {
+              value = numValue;
+              console.log(`🔢 [Characteristics API] Числовая характеристика: ${categoryChar.name} = ${value} (тип: ${categoryChar.type})`);
+            } else {
+              value = String(aiValue);
+              console.warn(`⚠️ [Characteristics API] Не удалось конвертировать в число: ${categoryChar.name} = "${aiValue}" (тип: ${categoryChar.type})`);
+            }
+          } else {
+            value = String(aiValue);
+          }
+          
           confidence = aiChar.confidence || 0.85;
           reasoning = aiChar.reasoning || 'Заполнено системой ИИ';
           category = 'ai_filled';
           
-          console.log(`✅ [Characteristics API] Характеристика заполнена: ${categoryChar.name} = "${value}"`);
+          console.log(`✅ [Characteristics API] Характеристика заполнена: ${categoryChar.name} = "${value}" (тип: ${typeof value})`);
         } else {
           console.log(`⚠️ [Characteristics API] AI характеристика найдена, но значение пустое: ${categoryChar.name}`);
         }
@@ -322,17 +339,28 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { characteristicId, value, action } = body;
+    const { characteristicId, value, action, type } = body;
 
-    console.log('📝 [Characteristics API] Данные запроса:', { characteristicId, value, action });
+    console.log('📝 [Characteristics API] Данные запроса:', { characteristicId, value, action, type });
 
     if (action === 'update' && characteristicId !== undefined && value !== undefined) {
-      // Получение товара
+      // Получение товара с информацией о характеристиках
       const product = await safePrismaOperation(
         () => prisma.product.findFirst({
           where: {
             id: params.id,
             userId: user.id
+          },
+          include: {
+            subcategory: {
+              include: {
+                characteristics: {
+                  where: {
+                    wbCharacteristicId: parseInt(characteristicId) || characteristicId
+                  }
+                }
+              }
+            }
           }
         }),
         'получение товара для обновления'
@@ -362,6 +390,29 @@ export async function PUT(
       const characteristics = aiData.characteristics || [];
       console.log(`📊 [Characteristics API] Найдено характеристик: ${characteristics.length}`);
 
+      // Определение типа характеристики из БД
+      let characteristicType = type || 'string';
+      const categoryChar = product.subcategory?.characteristics?.[0];
+      if (categoryChar) {
+        characteristicType = categoryChar.type;
+        console.log(`🔍 [Characteristics API] Тип характеристики из БД: ${characteristicType}`);
+      }
+
+      // Обработка значения в зависимости от типа
+      let processedValue = value;
+      if (characteristicType === 'number' || characteristicType === 'integer' || characteristicType === 'float') {
+        if (typeof value === 'string') {
+          const cleanValue = value.replace(/[^\d.,\-]/g, '').replace(',', '.');
+          const numValue = parseFloat(cleanValue);
+          if (!isNaN(numValue) && isFinite(numValue)) {
+            processedValue = numValue;
+            console.log(`🔢 [Characteristics API] Конвертация в число: "${value}" → ${processedValue}`);
+          } else {
+            console.warn(`⚠️ [Characteristics API] Не удалось конвертировать в число: "${value}"`);
+          }
+        }
+      }
+
       // Поиск характеристики для обновления
       const existingIndex = characteristics.findIndex((char: any) => 
         char.id === characteristicId || 
@@ -375,10 +426,11 @@ export async function PUT(
         console.log(`✏️ [Characteristics API] Обновляем характеристику: ${characteristics[existingIndex].name}`);
         characteristics[existingIndex] = {
           ...characteristics[existingIndex],
-          value: value,
-          isFilled: !!value,
+          value: processedValue,
+          isFilled: processedValue !== null && processedValue !== undefined && String(processedValue).trim() !== '',
           updatedAt: new Date().toISOString(),
-          updatedBy: 'user'
+          updatedBy: 'user',
+          type: characteristicType
         };
       } else {
         // Добавление новой характеристики
@@ -386,13 +438,13 @@ export async function PUT(
         characteristics.push({
           id: parseInt(characteristicId) || characteristicId,
           characteristicId: parseInt(characteristicId) || characteristicId,
-          name: `Характеристика ${characteristicId}`,
-          value: value,
+          name: categoryChar?.name || `Характеристика ${characteristicId}`,
+          value: processedValue,
           confidence: 1.0,
           reasoning: 'Добавлено пользователем',
           source: 'user_input',
-          type: 'string',
-          isFilled: !!value,
+          type: characteristicType,
+          isFilled: processedValue !== null && processedValue !== undefined && String(processedValue).trim() !== '',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           updatedBy: 'user'

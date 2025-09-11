@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma, safePrismaOperation } from '@/lib/prisma';
 import { AuthService } from '@/lib/auth/auth-service';
 import { WB_API_CONFIG } from '@/lib/config/wbApiConfig';
+import { WB_COLORS } from '@/lib/config/wbColors';
 
 // POST метод для сохранения финальных данных и публикации товара
 export async function POST(
@@ -202,10 +203,62 @@ export async function POST(
         description: seoDescription, 
         brand: brand,
         subjectID: product.subcategoryId,
-        characteristics: characteristics.map((char: any) => ({
-          id: char.id,
-          value: char.value
-        })).filter((char: any) => {
+        characteristics: characteristics.map((char: any) => {
+          let processedValue = char.value;
+          
+          // Обработка числовых характеристик
+          if (char.type === 'number' || char.type === 'integer' || char.type === 'float') {
+            if (typeof char.value === 'string') {
+              const numValue = parseFloat(char.value.replace(/[^\d.,\-]/g, '').replace(',', '.'));
+              if (!isNaN(numValue) && isFinite(numValue)) {
+                processedValue = numValue;
+                console.log(`🔢 [WB Publish] Конвертация числовой характеристики ${char.name}: "${char.value}" → ${processedValue}`);
+              }
+            }
+          }
+          
+          // Валидация цветов с использованием базы цветов WB
+          if (char.name && char.name.toLowerCase().includes('цвет') && typeof processedValue === 'string') {
+            const originalColor = processedValue;
+            processedValue = processedValue.trim().toLowerCase();
+            
+            // Проверяем, есть ли цвет в базе WB (регистронезависимый поиск)
+            const validColor = WB_COLORS.UTILS.findByName(processedValue) || 
+                              WB_COLORS.UTILS.findByName(originalColor);
+            
+            if (validColor) {
+              processedValue = validColor.value;
+              console.log(`✅ [WB Publish] Найден валидный цвет: "${originalColor}" → "${processedValue}"`);
+            } else {
+              // Пытаемся найти похожий цвет
+              const allColors = WB_COLORS.UTILS.getAllColors();
+              const similarColor = allColors.find(color => 
+                color.value.toLowerCase().includes(processedValue) || 
+                processedValue.includes(color.value.toLowerCase())
+              );
+              
+              if (similarColor) {
+                processedValue = similarColor.value;
+                console.log(`🔄 [WB Publish] Найден похожий цвет: "${originalColor}" → "${processedValue}"`);
+              } else {
+                // Если не найден, оставляем как есть, но предупреждаем
+                processedValue = originalColor.trim();
+                console.warn(`⚠️ [WB Publish] Цвет не найден в базе WB: "${originalColor}". Оставляем как есть.`);
+              }
+            }
+            
+            // Проверяем длину
+            if (processedValue.length > 50) {
+              console.warn(`⚠️ [WB Publish] Цвет слишком длинный: ${processedValue}`);
+              processedValue = processedValue.substring(0, 50);
+            }
+          }
+          
+          return {
+            id: char.id,
+            value: processedValue
+          };
+        }).filter((char: any) => {
           if (char.value == null || char.value === '') return false;
           // Handle both string and number values
           if (typeof char.value === 'string') {
