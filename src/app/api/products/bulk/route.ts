@@ -228,11 +228,11 @@ export async function POST(request: NextRequest) {
           },
           data: {
             status: 'PROCESSING',
-            errorMessage: null,
-            aiCharacteristics: null,
-            generatedName: null,
-            seoDescription: null,
-            colorAnalysis: null
+            errorMessage: '',
+            aiCharacteristics: '{}',
+            generatedName: '',
+            seoDescription: '',
+            colorAnalysis: '{}'
           }
         });
 
@@ -248,8 +248,12 @@ export async function POST(request: NextRequest) {
           let wbData: any = {};
           
           try {
-            aiData = product.aiCharacteristics ? JSON.parse(product.aiCharacteristics) : {};
-            wbData = product.wbData ? JSON.parse(product.wbData) : {};
+            if (product.aiCharacteristics && typeof product.aiCharacteristics === 'string') {
+              aiData = JSON.parse(product.aiCharacteristics);
+            }
+            if (product.wbData && typeof product.wbData === 'string') {
+              wbData = JSON.parse(product.wbData);
+            }
           } catch (e) {
             console.warn('Ошибка парсинга данных при экспорте');
           }
@@ -378,7 +382,10 @@ export async function GET(request: NextRequest) {
 
     productsWithSizes.forEach(product => {
       try {
-        const wbData = product.wbData ? JSON.parse(product.wbData) : {};
+        let wbData: any = {};
+        if (product.wbData && typeof product.wbData === 'string') {
+          wbData = JSON.parse(product.wbData);
+        }
         if (wbData.hasVariantSizes && Array.isArray(wbData.variantSizes)) {
           sizesStats.withSizes++;
           sizesStats.totalSizes += wbData.variantSizes.length;

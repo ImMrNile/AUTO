@@ -45,11 +45,13 @@ export async function GET() {
       },
       include: {
         productCabinets: {
-          include: {
+          select: {
+            productId: true,
             product: {
               select: {
                 id: true,
-                status: true
+                status: true,
+                name: true
               }
             }
           }
@@ -69,25 +71,30 @@ export async function GET() {
     });
 
     // Обрабатываем кабинеты и добавляем статистику
-    const cabinetsWithStats = cabinets.map(cabinet => ({
-      id: cabinet.id,
-      userId: cabinet.userId,
-      name: cabinet.name,
-      description: cabinet.description,
-      apiToken: maskToken(cabinet.apiToken || ''),
-      isActive: cabinet.isActive,
-      createdAt: cabinet.createdAt,
-      updatedAt: cabinet.updatedAt,
-      stats: {
-        totalProducts: cabinet.productCabinets.length,
-        publishedProducts: cabinet.productCabinets.filter(pc => 
-          pc.product.status === 'PUBLISHED'
-        ).length,
-        processingProducts: cabinet.productCabinets.filter(pc => 
-          pc.product.status === 'PROCESSING' || pc.product.status === 'PUBLISHING'
-        ).length
-      }
-    }));
+    const cabinetsWithStats = cabinets.map(cabinet => {
+      // Фильтруем только записи с существующим товаром
+      const validProductCabinets = cabinet.productCabinets.filter(pc => pc.product !== null);
+      
+      return {
+        id: cabinet.id,
+        userId: cabinet.userId,
+        name: cabinet.name,
+        description: cabinet.description,
+        apiToken: maskToken(cabinet.apiToken || ''),
+        isActive: cabinet.isActive,
+        createdAt: cabinet.createdAt,
+        updatedAt: cabinet.updatedAt,
+        stats: {
+          totalProducts: validProductCabinets.length,
+          publishedProducts: validProductCabinets.filter(pc => 
+            pc.product?.status === 'PUBLISHED'
+          ).length,
+          processingProducts: validProductCabinets.filter(pc => 
+            pc.product?.status === 'PROCESSING' || pc.product?.status === 'PUBLISHING'
+          ).length
+        }
+      };
+    });
 
     console.log('✅ [API Cabinets] Отправляем ответ с кабинетами:', {
       count: cabinetsWithStats.length,

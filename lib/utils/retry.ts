@@ -1,5 +1,8 @@
 // lib/utils/retry.ts - Утилита для retry операций с базой данных
 
+import { prisma } from '../prisma';
+import { ensurePrismaConnected } from '../prisma-utils';
+
 export interface RetryOptions {
   maxAttempts?: number;
   delay?: number;
@@ -52,23 +55,20 @@ export async function withRetry<T>(
   throw lastError!;
 }
 
-// Специализированная версия для Prisma операций
+// Специализированная версия для Prisma операций (оптимизировано для аналитики)
 export async function withPrismaRetry<T>(
   operation: () => Promise<T>,
   operationName: string = 'Prisma operation'
 ): Promise<T> {
-  return withRetry(operation, {
-    maxAttempts: 3,
-    delay: 500,
-    backoff: 2,
-    shouldRetry: (error: Error) => {
-      const message = error.message.toLowerCase();
-      return message.includes('database server') ||
-             message.includes('connection') ||
-             message.includes('timeout') ||
-             message.includes('engine is not yet connected') ||
-             message.includes('econnrefused') ||
-             message.includes('etimedout');
+  try {
+    return await operation();
+  } catch (error) {
+    const err = error as Error;
+    
+    if (process.env.NODE_ENV !== 'production') {
+      console.error(`❌ [Retry] ${operationName} failed:`, err.message);
     }
-  });
+    
+    throw error;
+  }
 }

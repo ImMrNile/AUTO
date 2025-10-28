@@ -1,5 +1,5 @@
-import { createClient } from './../../../../lib/supabase/server'
-import { AuthService } from './../../../../lib/auth/auth-service'
+import { createClient } from '@/lib/supabase/server'
+import { AuthService } from '@/lib/auth/auth-service'
 import { NextResponse } from 'next/server'
 
 export async function GET() {

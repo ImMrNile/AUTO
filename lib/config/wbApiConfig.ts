@@ -4,7 +4,11 @@ export const WB_API_CONFIG = {
     BASE_URLS: {
       CONTENT: 'https://content-api.wildberries.ru',
       MARKETPLACE: 'https://marketplace-api.wildberries.ru',
-      SUPPLIES: 'https://supplies-api.wildberries.ru'
+      SUPPLIES: 'https://supplies-api.wildberries.ru',
+      ANALYTICS: 'https://seller-analytics-api.wildberries.ru',
+      COMMON: 'https://common-api.wildberries.ru',
+      PRICES: 'https://discounts-prices-api.wildberries.ru',
+      STATISTICS: 'https://statistics-api.wildberries.ru'
     },
     
     ENDPOINTS: {
@@ -16,7 +20,20 @@ export const WB_API_CONFIG = {
       GET_ERRORS: '/content/v2/cards/error/list',
       GET_COLORS: '/content/v2/directory/colors',
       GET_COUNTRIES: '/content/v2/directory/countries',
-      UPLOAD_MEDIA: '/content/v1/media'
+      UPLOAD_MEDIA: '/content/v1/media',
+      GET_CARD_BY_VENDOR_CODE: '/content/v2/get/cards/list',
+      SET_PRICES: '/api/v3/prices',
+      SET_STOCK: '/api/v3/stocks',
+      // Analytics API endpoints
+      SEARCH_QUERIES: '/api/v1/analytics/nm-report/search-queries',
+      CATEGORY_ANALYTICS: '/api/v1/analytics/category-analytics',
+      KEYWORDS_REPORT: '/api/v1/analytics/keywords-report',
+      PING_ANALYTICS: '/ping',
+      // Statistics API endpoints (детализированные отчеты)
+      REPORT_DETAIL_BY_PERIOD: '/api/v5/supplier/reportDetailByPeriod',
+      SALES: '/api/v1/supplier/sales',
+      ORDERS: '/api/v1/supplier/orders',
+      STOCKS: '/api/v1/supplier/stocks'
     },
     
     TIMEOUTS: {

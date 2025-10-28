@@ -42,7 +42,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (response.ok) {
         const data = await response.json();
-        console.log('🔍 [AuthProvider] Данные сессии:', { success: data.success, user: data.user?.email });
+        console.log('🔍 [AuthProvider] Данные сессии:', data);
+        console.log('🔍 [AuthProvider] success:', data.success);
+        console.log('🔍 [AuthProvider] user:', data.user);
+        console.log('🔍 [AuthProvider] message:', data.message);
         
         if (data.success && data.user) {
           console.log('✅ [AuthProvider] Пользователь найден:', data.user.email);
@@ -50,6 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setAuthError(null);
         } else {
           console.log('🔍 [AuthProvider] Пользователь не найден или сессия неактивна');
+          console.log('🔍 [AuthProvider] Причина:', data.message);
           setUser(null);
           setAuthError(data.message || 'Сессия не найдена');
         }

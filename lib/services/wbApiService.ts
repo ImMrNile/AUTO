@@ -191,7 +191,7 @@ export class WbApiService {
   /**
    * Универсальный метод для запросов к WB API с улучшенной обработкой таймаутов и повторными попытками
    */
-  private async makeRequest(endpoint: string, apiToken: string, options: RequestInit = {}, retryCount: number = 0): Promise<any> {
+  private async makeRequest(endpoint: string, apiToken: string, options: RequestInit = {}, retryCount: number = 0, baseUrl?: string): Promise<any> {
     const maxRetries = 3;
     const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 10000); // Экспоненциальная задержка, максимум 10 секунд
     
@@ -199,7 +199,14 @@ export class WbApiService {
       throw new Error('Недействительный токен API. Проверьте формат и срок действия.');
     }
 
-    const url = `${this.BASE_URL}${endpoint}`;
+    // Выбираем правильный base URL в зависимости от endpoint
+    let selectedBaseUrl = baseUrl || this.BASE_URL;
+    if (!baseUrl && (endpoint.includes('/api/v3/offers') || endpoint.includes('/api/v3/prices') || endpoint.includes('/api/v3/stocks') || endpoint.includes('/api/v2/upload/task'))) {
+      selectedBaseUrl = WB_API_CONFIG.BASE_URLS.PRICES;
+      console.log(`🔄 Используем PRICES API для endpoint: ${endpoint}`);
+    }
+
+    const url = `${selectedBaseUrl}${endpoint}`;
     
     const headers = {
       'Authorization': apiToken,
@@ -250,7 +257,7 @@ export class WbApiService {
         if (shouldRetry && retryCount < maxRetries) {
           console.log(`🔄 Повторяем запрос через ${retryDelay}мс...`);
           await new Promise(resolve => setTimeout(resolve, retryDelay));
-          return this.makeRequest(endpoint, apiToken, options, retryCount + 1);
+          return this.makeRequest(endpoint, apiToken, options, retryCount + 1, baseUrl);
         }
         
         // Детальная обработка ошибок
@@ -271,7 +278,7 @@ export class WbApiService {
           if (retryCount < maxRetries) {
             console.log(`🔄 Таймаут, повторяем запрос через ${retryDelay}мс...`);
             await new Promise(resolve => setTimeout(resolve, retryDelay));
-            return this.makeRequest(endpoint, apiToken, options, retryCount + 1);
+            return this.makeRequest(endpoint, apiToken, options, retryCount + 1, baseUrl);
           }
           
           throw timeoutError;
@@ -286,7 +293,7 @@ export class WbApiService {
         if (isNetworkError && retryCount < maxRetries) {
           console.log(`🔄 Сетевая ошибка, повторяем запрос через ${retryDelay}мс...`);
           await new Promise(resolve => setTimeout(resolve, retryDelay));
-          return this.makeRequest(endpoint, apiToken, options, retryCount + 1);
+          return this.makeRequest(endpoint, apiToken, options, retryCount + 1, baseUrl);
         }
         
         throw error;
@@ -1194,6 +1201,72 @@ private logWeightConversion(originalInput: any, finalWeight: number): void {
   }
 
   /**
+   * Диагностика публикации товара: проверяем по taskId и по vendorCode
+   */
+  public async diagnosePublicationStatus(
+    params: { taskId?: string | null; vendorCode?: string | null; apiToken: string }
+  ): Promise<{
+    published: boolean;
+    reasons: string[];
+    details: Record<string, any>;
+  }> {
+    const reasons: string[] = [];
+    const details: Record<string, any> = {};
+
+    const { taskId, vendorCode, apiToken } = params;
+
+    // 1) Если есть taskId — проверяем статус задачи в WB
+    if (taskId) {
+      try {
+        const taskRes = await this.checkTaskStatus(taskId, apiToken);
+        details.taskStatus = taskRes;
+
+        const data = (taskRes.data || {}) as any;
+        // API WB для статусов обычно возвращает ошибки в полях data или errors
+        const hasErrors = Array.isArray(data?.errors) ? data.errors.length > 0 : !!data?.error;
+        if (hasErrors) {
+          const errorsList = Array.isArray(data.errors) ? data.errors : [data.error].filter(Boolean);
+          reasons.push(`Ошибки задачи публикации: ${JSON.stringify(errorsList)}`);
+        }
+      } catch (e) {
+        reasons.push(`Не удалось проверить статус задачи: ${(e as Error).message}`);
+      }
+    } else {
+      reasons.push('Нет taskId для проверки статуса задачи публикации.');
+    }
+
+    // 2) Если есть vendorCode — ищем карточку по артикулу
+    if (vendorCode) {
+      try {
+        const cardRes = await this.getProductByVendorCode(vendorCode, apiToken);
+        details.productLookup = cardRes;
+
+        const list = (cardRes.data || cardRes) as any;
+        // Предполагаем, что WB вернет список карточек/товаров
+        const items: any[] = Array.isArray(list?.data) ? list.data : (Array.isArray(list) ? list : []);
+
+        if (items.length === 0) {
+          reasons.push(`Товар с артикулом ${vendorCode} не найден в каталоге WB.`);
+        } else {
+          details.matchedItems = items.length;
+        }
+      } catch (e) {
+        reasons.push(`Не удалось получить карточку по артикулу: ${(e as Error).message}`);
+      }
+    } else {
+      reasons.push('Нет vendorCode для поиска товара в WB.');
+    }
+
+    // Простая эвристика: если нет явных ошибок и товар найден — считаем опубликованным
+    const productFound = !!details.matchedItems && details.matchedItems > 0;
+    const hasBlockingErrors = reasons.some(r => r.toLowerCase().includes('ошибк'));
+
+    const published = productFound && !hasBlockingErrors;
+
+    return { published, reasons: reasons.filter(Boolean), details };
+  }
+
+  /**
    * Проверка здоровья API
    */
   async checkApiHealth(apiToken: string): Promise<ApiHealthResult> {
@@ -1495,7 +1568,7 @@ private logWeightConversion(originalInput: any, finalWeight: number): void {
       
       // Создаем FormData для загрузки
       const formData = new FormData();
-      const blob = new Blob([imageBuffer], { type: 'image/jpeg' });
+      const blob = new Blob([new Uint8Array(imageBuffer)], { type: 'image/jpeg' });
       formData.append('uploadfile', blob, fileName);
 
       const response = await fetch(`${this.BASE_URL}/content/v2/media/save`, {
@@ -1574,6 +1647,484 @@ private logWeightConversion(originalInput: any, finalWeight: number): void {
       version: '2.0.0',
       endpoints: Object.values(WB_API_CONFIG.ENDPOINTS)
     };
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Получение nmId товара по vendorCode
+   */
+  async getNmIdByVendorCode(
+    apiToken: string,
+    vendorCode: string,
+    maxRetries: number = 5,
+    retryDelay: number = 3000
+  ): Promise<WBApiResponse> {
+    let lastError: any = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔍 [WB API] Попытка ${attempt}/${maxRetries} получения nmId для артикула ${vendorCode}`);
+        
+        const response = await this.makeRequest(
+          WB_API_CONFIG.ENDPOINTS.GET_CARD_BY_VENDOR_CODE,
+          apiToken,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              settings: {
+                filter: {
+                  textSearch: vendorCode,
+                  withPhoto: -1
+                },
+                cursor: {
+                  limit: 1
+                }
+              }
+            })
+          }
+        );
+        
+        // Проверяем наличие данных
+        if (response && response.cards && Array.isArray(response.cards) && response.cards.length > 0) {
+          const card = response.cards[0];
+          const nmId = card.nmID || card.nmId;
+          
+          if (nmId) {
+            console.log(`✅ [WB API] Получен nmId: ${nmId} для артикула ${vendorCode}`);
+            return {
+              success: true,
+              data: { nmId, card }
+            };
+          }
+        }
+        
+        // Если товар еще не обработан на WB, ждем и повторяем
+        if (attempt < maxRetries) {
+          console.log(`⏳ [WB API] Товар еще обрабатывается на WB. Ожидание ${retryDelay}мс...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          retryDelay *= 1.2; // Увеличиваем задержку с каждой попыткой
+        }
+        
+      } catch (error) {
+        lastError = error;
+        console.warn(`⚠️ [WB API] Ошибка при попытке ${attempt}:`, error instanceof Error ? error.message : error);
+        
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          retryDelay *= 1.2;
+        }
+      }
+    }
+    
+    console.error(`❌ [WB API] Не удалось получить nmId для артикула ${vendorCode} после ${maxRetries} попыток`);
+    return {
+      success: false,
+      error: `Товар еще обрабатывается на WB или не найден. Последняя ошибка: ${lastError}`
+    };
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Установка цены на товар после его создания
+   * Используется правильный endpoint: /api/v2/upload/task
+   * Документация: https://dev.wildberries.ru/en/openapi/work-with-products
+   */
+  async setProductDiscount(
+    apiToken: string, 
+    nmId: number, 
+    discountPrice: number,
+    originalPrice?: number,
+    vendorCode?: string
+  ): Promise<WBApiResponse> {
+    try {
+      console.log(`💰 [WB Price] Установка цены для товара ${nmId}`);
+      console.log(`   - Цена: ${discountPrice}₽`);
+      if (originalPrice) {
+        console.log(`   - Оригинальная цена: ${originalPrice}₽`);
+      }
+      
+      // Используем правильный endpoint для обновления цен
+      // Формат: { data: [{ nmID, price, discount }] }
+      const requestData = {
+        data: [{
+          nmID: nmId,
+          price: Math.round(discountPrice)
+        }]
+      };
+      
+      console.log(`📤 [WB Price] Отправляем данные:`, requestData);
+      console.log(`🌐 [WB Price] Endpoint: POST /api/v2/upload/task`);
+      
+      const response = await this.makeRequest(
+        `/api/v2/upload/task`,
+        apiToken,
+        {
+          method: 'POST',
+          body: JSON.stringify(requestData)
+        }
+      );
+      
+      console.log(`✅ [WB Price] Цена успешно установлена для товара ${nmId}`);
+      console.log(`📊 [WB Price] Ответ от WB:`, response);
+      
+      return {
+        success: true,
+        data: response
+      };
+    } catch (error) {
+      console.error(`❌ [WB Price] Ошибка установки цены для товара ${nmId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Неизвестная ошибка установки цены'
+      };
+    }
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Установка цены с повторными попытками
+   */
+  async setProductDiscountWithRetry(
+    apiToken: string, 
+    nmId: number, 
+    discountPrice: number,
+    maxRetries: number = 3,
+    retryDelay: number = 5000,
+    vendorCode?: string
+  ): Promise<WBApiResponse> {
+    let lastError: any = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      console.log(`🔄 [WB Price] Попытка ${attempt}/${maxRetries} установки цены для товара ${nmId}`);
+      
+      const result = await this.setProductDiscount(apiToken, nmId, discountPrice, undefined, vendorCode);
+      
+      if (result.success) {
+        console.log(`✅ [WB Price] Цена успешно установлена с попытки ${attempt}`);
+        return result;
+      }
+      
+      lastError = result.error;
+      
+      // Если это не последняя попытка, ждем перед повтором
+      if (attempt < maxRetries) {
+        console.log(`⏳ [WB Price] Ожидание ${retryDelay}мс перед повторной попыткой...`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        retryDelay *= 1.5; // Увеличиваем задержку с каждой попыткой
+      }
+    }
+    
+    console.error(`❌ [WB Price] Не удалось установить цену после ${maxRetries} попыток`);
+    return {
+      success: false,
+      error: `Не удалось установить цену после ${maxRetries} попыток. Последняя ошибка: ${lastError}`
+    };
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Получение списка складов продавца
+   */
+  async getWarehouses(apiToken: string): Promise<WBApiResponse> {
+    try {
+      console.log('📦 [WB Stocks] Получение списка складов продавца...');
+      
+      const response = await this.makeRequest(
+        '/api/v3/warehouses',
+        apiToken,
+        {
+          method: 'GET'
+        }
+      );
+      
+      console.log(`✅ [WB Stocks] Получено складов: ${response?.length || 0}`);
+      
+      return {
+        success: true,
+        data: response
+      };
+    } catch (error) {
+      console.error('❌ [WB Stocks] Ошибка получения складов:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Неизвестная ошибка получения складов'
+      };
+    }
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Установка остатков товара на складе
+   */
+  async setProductStock(
+    apiToken: string,
+    warehouseId: number,
+    barcode: string,
+    amount: number
+  ): Promise<WBApiResponse> {
+    try {
+      console.log(`📦 [WB Stocks] Установка остатка для товара ${barcode} на складе ${warehouseId}: ${amount} шт`);
+      
+      const stockData = {
+        stocks: [
+          {
+            sku: barcode,
+            amount: Math.max(0, Math.floor(amount)) // Только положительные целые числа
+          }
+        ]
+      };
+      
+      const response = await this.makeRequest(
+        `/api/v3/stocks/${warehouseId}`,
+        apiToken,
+        {
+          method: 'PUT',
+          body: JSON.stringify(stockData)
+        }
+      );
+      
+      console.log(`✅ [WB Stocks] Остаток успешно установлен для товара ${barcode}`);
+      
+      return {
+        success: true,
+        data: response
+      };
+    } catch (error) {
+      console.error(`❌ [WB Stocks] Ошибка установки остатка для товара ${barcode}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Неизвестная ошибка установки остатка'
+      };
+    }
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Установка остатков с повторными попытками
+   */
+  async setProductStockWithRetry(
+    apiToken: string,
+    warehouseId: number,
+    barcode: string,
+    amount: number,
+    maxRetries: number = 3,
+    retryDelay: number = 3000
+  ): Promise<WBApiResponse> {
+    let lastError: any = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      console.log(`🔄 [WB Stocks] Попытка ${attempt}/${maxRetries} установки остатка для товара ${barcode}`);
+      
+      const result = await this.setProductStock(apiToken, warehouseId, barcode, amount);
+      
+      if (result.success) {
+        console.log(`✅ [WB Stocks] Остаток успешно установлен с попытки ${attempt}`);
+        return result;
+      }
+      
+      lastError = result.error;
+      
+      // Если это не последняя попытка, ждем перед повтором
+      if (attempt < maxRetries) {
+        console.log(`⏳ [WB Stocks] Ожидание ${retryDelay}мс перед повторной попыткой...`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        retryDelay *= 1.5; // Увеличиваем задержку с каждой попыткой
+      }
+    }
+    
+    console.error(`❌ [WB Stocks] Не удалось установить остаток после ${maxRetries} попыток`);
+    return {
+      success: false,
+      error: `Не удалось установить остаток после ${maxRetries} попыток. Последняя ошибка: ${lastError}`
+    };
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Получение остатков товара
+   */
+  async getProductStock(
+    apiToken: string,
+    warehouseId: number
+  ): Promise<WBApiResponse> {
+    try {
+      console.log(`📦 [WB Stocks] Получение остатков на складе ${warehouseId}...`);
+      
+      const response = await this.makeRequest(
+        `/api/v3/stocks/${warehouseId}`,
+        apiToken,
+        {
+          method: 'GET'
+        }
+      );
+      
+      console.log(`✅ [WB Stocks] Получены остатки: ${response?.stocks?.length || 0} позиций`);
+      
+      return {
+        success: true,
+        data: response
+      };
+    } catch (error) {
+      console.error(`❌ [WB Stocks] Ошибка получения остатков:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Неизвестная ошибка получения остатков'
+      };
+    }
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Получение текущей цены товара с WB
+   */
+  async getProductPrice(
+    apiToken: string,
+    nmId: number
+  ): Promise<WBApiResponse> {
+    try {
+      console.log(`💰 [WB Price] Получение цены товара ${nmId}...`);
+      
+      // Используем endpoint для получения информации о ценах
+      const response = await this.makeRequest(
+        `/public/api/v1/info?nm=${nmId}`,
+        apiToken,
+        {
+          method: 'GET'
+        }
+      );
+      
+      // Извлекаем цену из ответа
+      if (response && Array.isArray(response) && response.length > 0) {
+        const productInfo = response[0];
+        const price = productInfo.sizes?.[0]?.price || productInfo.price || 0;
+        
+        console.log(`✅ [WB Price] Получена цена товара ${nmId}: ${price}₽`);
+        
+        return {
+          success: true,
+          data: {
+            nmId: nmId,
+            price: price,
+            rawData: productInfo
+          }
+        };
+      }
+      
+      console.warn(`⚠️ [WB Price] Не удалось получить цену товара ${nmId}`);
+      return {
+        success: false,
+        error: 'Товар не найден или нет данных о цене'
+      };
+    } catch (error) {
+      console.error(`❌ [WB Price] Ошибка получения цены товара ${nmId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Неизвестная ошибка получения цены'
+      };
+    }
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Получение остатков товаров со складов
+   * Использует WB Marketplace API: GET /api/v3/stocks/{warehouseId}
+   * Документация: https://openapi.wildberries.ru/#tag/Ostatki
+   */
+  async getStocks(apiToken: string, warehouseId?: number): Promise<any[]> {
+    try {
+      console.log(`📦 [WB Stocks] Получение остатков товаров${warehouseId ? ` для склада ${warehouseId}` : ''}...`);
+      
+      // Если указан конкретный склад, используем endpoint с warehouseId
+      const endpoint = warehouseId 
+        ? `/api/v3/stocks/${warehouseId}`
+        : `/api/v3/stocks/0`; // 0 = все склады
+      
+      const response = await this.makeRequest(
+        endpoint,
+        apiToken,
+        {
+          method: 'GET'
+        },
+        0,
+        WB_API_CONFIG.BASE_URLS.MARKETPLACE // Используем Marketplace API
+      );
+      
+      // Ответ приходит в формате { stocks: [...] }
+      const stocks = response?.stocks || response || [];
+      console.log(`✅ [WB Stocks] Получены остатки для ${stocks.length || 0} позиций`);
+      
+      return stocks;
+    } catch (error) {
+      console.error(`❌ [WB Stocks] Ошибка получения остатков:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Обновление остатков на складе
+   * Использует WB Marketplace API: PUT /api/v3/stocks/{warehouseId}
+   * Документация: https://openapi.wildberries.ru/#tag/Ostatki
+   */
+  async updateStock(
+    apiToken: string,
+    warehouseId: number,
+    sku: string,
+    amount: number
+  ): Promise<boolean> {
+    try {
+      console.log(`📦 [WB Update Stock] Обновление остатка: SKU=${sku}, склад=${warehouseId}, количество=${amount}`);
+      
+      const response = await this.makeRequest(
+        `/api/v3/stocks/${warehouseId}`,
+        apiToken,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            stocks: [{
+              sku: sku,
+              amount: amount
+            }]
+          })
+        },
+        0,
+        WB_API_CONFIG.BASE_URLS.MARKETPLACE // Используем Marketplace API
+      );
+      
+      console.log(`✅ [WB Update Stock] Остаток успешно обновлен`);
+      return true;
+    } catch (error) {
+      console.error(`❌ [WB Update Stock] Ошибка обновления остатка:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * НОВАЯ ФУНКЦИЯ: Получение заказов за период
+   */
+  async getOrders(
+    apiToken: string,
+    options: {
+      dateFrom?: string;
+      dateTo?: string;
+      limit?: number;
+    } = {}
+  ): Promise<{ orders: any[] }> {
+    try {
+      console.log(`📋 [WB Orders] Получение заказов за период: ${options.dateFrom} - ${options.dateTo}`);
+      
+      const params = new URLSearchParams();
+      if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+      if (options.dateTo) params.append('dateTo', options.dateTo);
+      if (options.limit) params.append('limit', options.limit.toString());
+      
+      const response = await this.makeRequest(
+        `/api/v2/orders?${params.toString()}`,
+        apiToken,
+        {
+          method: 'GET'
+        }
+      );
+      
+      console.log(`✅ [WB Orders] Получено заказов: ${response?.orders?.length || 0}`);
+      return response || { orders: [] };
+    } catch (error) {
+      console.error(`❌ [WB Orders] Ошибка получения заказов:`, error);
+      return { orders: [] };
+    }
   }
 }
 

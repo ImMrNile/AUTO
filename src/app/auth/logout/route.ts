@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { prisma } from '../../../../lib/prisma';
+import { prisma } from '@/lib/prisma';
 
 export async function POST(request: Request) {
   try {
-    console.log('🔐 [API Logout] Начало процесса выхода...');
+    console.log(' [API Logout] Начало процесса выхода...');
     
     // Получаем cookie с сессией
     const cookieStore = cookies();

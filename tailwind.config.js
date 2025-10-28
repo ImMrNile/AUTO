@@ -10,6 +10,15 @@ module.exports = {
       colors: {
         background: 'var(--background)',
         foreground: 'var(--foreground)',
+        primary: {
+          DEFAULT: '#6D28D9',
+          hover: '#5B21B6',
+        },
+        'text-main': '#1F2937',
+        'text-subtle': '#4B5563',
+      },
+      boxShadow: {
+        'inner-soft': 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.03)',
       },
       animation: {
         'fade-in': 'fadeIn 0.5s ease-in-out',

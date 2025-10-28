@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
 import { prisma } from '../../../../../lib/prisma';
 
@@ -6,15 +7,74 @@ export async function GET(request: NextRequest) {
   try {
     console.log('🔐 [API Session] === НАЧАЛО GET /api/auth/session ===');
     
-    // Получаем cookie с сессией
-    const cookieStore = cookies();
-    console.log('🔐 [API Session] Cookie store получен');
+    // ВАРИАНТ 1: Проверяем Supabase Auth (новая система)
+    const supabase = createClient();
+    const { data: { user: supabaseUser }, error: supabaseError } = await supabase.auth.getUser();
     
+    console.log('🔐 [API Session] Supabase user:', supabaseUser ? supabaseUser.email : 'не найден');
+    
+    if (supabaseUser && !supabaseError) {
+      console.log('✅ [API Session] Найдена сессия Supabase, ищем пользователя в БД...');
+      console.log('🔍 [API Session] Supabase User ID:', supabaseUser.id);
+      
+      // Ищем пользователя по supabaseId
+      let user = await prisma.user.findFirst({
+        where: { supabaseId: supabaseUser.id }
+      });
+      
+      console.log('🔍 [API Session] Результат поиска в БД:', user ? `Найден: ${user.email}` : 'НЕ НАЙДЕН');
+      
+      // Если пользователя нет - создаем автоматически
+      if (!user) {
+        console.log('👤 [API Session] Создаем пользователя автоматически...');
+        try {
+          user = await prisma.user.create({
+            data: {
+              supabaseId: supabaseUser.id,
+              email: supabaseUser.email || '',
+              name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'Пользователь',
+              role: 'USER',
+              isActive: true,
+              emailVerified: new Date(),
+              balance: 0
+            }
+          });
+          console.log('✅ [API Session] Пользователь создан автоматически:', user.email);
+        } catch (createError) {
+          console.error('❌ [API Session] Ошибка создания пользователя:', createError);
+        }
+      }
+      
+      if (user && user.isActive) {
+        console.log('✅ [API Session] Пользователь найден через Supabase:', user.email);
+        
+        const userData = {
+          id: user.id,
+          email: user.email,
+          name: user.name || undefined,
+          avatarUrl: user.avatarUrl || undefined,
+          role: user.role,
+          isActive: user.isActive
+        };
+        
+        return NextResponse.json({
+          success: true,
+          user: userData,
+          message: 'Сессия активна (Supabase)'
+        });
+      }
+    }
+    
+    console.log('🔐 [API Session] Supabase сессия не найдена, проверяем старую систему...');
+    
+    // ВАРИАНТ 2: Проверяем старую систему с session_token (для обратной совместимости)
+    const cookieStore = cookies();
     const sessionToken = cookieStore.get('session_token')?.value;
+    
     console.log('🔐 [API Session] Session token:', sessionToken ? `${sessionToken.substring(0, 10)}...` : 'не найден');
     
     if (!sessionToken) {
-      console.log('🔐 [API Session] Сессия не найдена');
+      console.log('🔐 [API Session] Ни одна сессия не найдена');
       return NextResponse.json({
         success: false,
         user: null,
@@ -24,21 +84,8 @@ export async function GET(request: NextRequest) {
     
     console.log('🔐 [API Session] Токен сессии найден, проверяем в БД...');
     
-    // Проверяем подключение к базе данных
-    console.log('🔐 [API Session] Проверка подключения к базе данных...');
-    try {
-      // Тестируем подключение простым запросом
-      await prisma.$queryRaw`SELECT 1 as test`;
-      console.log('✅ [API Session] Подключение к базе данных успешно');
-    } catch (dbError: any) {
-      console.error('❌ [API Session] Ошибка подключения к базе данных:', dbError);
-      return NextResponse.json({
-        success: false,
-        user: null,
-        error: 'Ошибка подключения к базе данных',
-        details: dbError.message
-      }, { status: 500 });
-    }
+    // ОПТИМИЗАЦИЯ: Убрали проверку подключения - она блокирует пул соединений
+    // Если Prisma работает, значит подключение есть
     
     // Ищем сессию в базе данных
     console.log('🔐 [API Session] Поиск сессии в БД с токеном:', sessionToken.substring(0, 10) + '...');

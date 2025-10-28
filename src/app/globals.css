@@ -2,21 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Fallback font import with timeout protection */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 /* Кастомные CSS переменные для тёмной темы */
 
 :root {
-    --glass-bg: rgba(255, 255, 255, 0.05);
-    --glass-border: rgba(255, 255, 255, 0.1);
-    --glass-hover: rgba(255, 255, 255, 0.08);
-    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    --text-primary: #ffffff;
-    --text-secondary: #e5e7eb;
-    --text-muted: #9ca3af;
+    --glass-bg: rgba(255, 255, 255, 0.8);
+    --glass-border: rgba(209, 213, 219, 0.5);
+    --glass-hover: rgba(255, 255, 255, 0.95);
+    --glass-shadow: 0 8px 32px rgba(167, 139, 250, 0.15);
+    --text-primary: #1f2937;
+    --text-secondary: #4b5563;
+    --text-muted: #6b7280;
     --accent-blue: #3b82f6;
     --accent-purple: #8b5cf6;
     --accent-green: #10b981;
-    --bg-primary: #000000;
-    --bg-secondary: #0a0a0a;
+    --bg-primary: #fce7f3;
+    --bg-secondary: #e9d5ff;
 }
 
 
@@ -26,10 +29,14 @@
     box-sizing: border-box;
 }
 
+html {
+    scroll-behavior: auto;
+}
+
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
+    background: #F8F7FC;
+    color: #1f2937;
     line-height: 1.6;
     margin: 0;
     padding: 0;
@@ -47,7 +54,7 @@ body {
 }
 
 
-/* Анимированный фон с шейпами */
+/* Анимированный фон с градиентом (светлая тема) */
 
 .animated-background {
     position: fixed;
@@ -55,175 +62,344 @@ body {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: radial-gradient(circle at 15% 15%, rgba(59, 130, 246, 0.1) 0%, transparent 50%), radial-gradient(circle at 85% 85%, rgba(139, 92, 246, 0.1) 0%, transparent 50%), radial-gradient(circle at 50% 30%, rgba(16, 185, 129, 0.08) 0%, transparent 50%), linear-gradient(135deg, #000000 0%, #0a0a0a 50%, #111111 100%);
+    background: #ffffff;
     z-index: -2;
-}
-
-
-/* Анимированные фигуры */
-
-.floating-shapes {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    pointer-events: none;
-    z-index: -1;
     overflow: hidden;
 }
 
-.floating-shape {
-    position: absolute;
-    border-radius: 50%;
-    background: linear-gradient(45deg, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.15));
-    animation: float 20s infinite linear;
+/* Жидкие волны - убраны для чистого белого фона */
+.animated-background::before {
+    content: '';
+    display: none;
 }
 
-.shape-1 {
-    width: 100px;
-    height: 100px;
-    top: 10%;
-    left: 10%;
+.animated-background::after {
+    content: '';
+    display: none;
+}
+
+@keyframes liquidWave {
+    0%, 100% {
+        transform: translateX(0) translateY(0) scale(1);
+    }
+    25% {
+        transform: translateX(-10%) translateY(-5%) scale(1.05);
+    }
+    50% {
+        transform: translateX(-15%) translateY(5%) scale(1.1);
+    }
+    75% {
+        transform: translateX(-5%) translateY(-3%) scale(1.05);
+    }
+}
+
+
+/* Анимированные фигуры (shapes) - из HTML */
+/* Шейпы БЕЗ blur - четкие и яркие */
+/* Blur применяется ТОЛЬКО через backdrop-filter на ликвид гласс элементах */
+
+.shape {
+    position: absolute;
+    border-radius: 50%;
+    animation: blob-move 25s infinite ease-in-out;
+    mix-blend-mode: normal;
+    filter: none;
+    opacity: 1;
+    will-change: transform;
+}
+
+/* Устаревшие классы - оставлены для совместимости */
+.shape-behind,
+.shape-front {
+    z-index: 0;
+    filter: none;
+    opacity: 1;
+}
+
+.shape1 {
+    width: 350px;
+    height: 350px;
+    background: radial-gradient(circle, #a855f7, #6366f1);
+    top: -10%;
+    left: -5%;
     animation-delay: 0s;
 }
 
-.shape-2 {
+.shape2 {
+    width: 200px;
+    height: 200px;
+    background: radial-gradient(circle, #3b82f6, #10b981);
+    bottom: -10%;
+    right: -5%;
+    animation-delay: 5s;
+    border-radius: 70% 30% 30% 70% / 60% 40% 60% 40%;
+}
+
+.shape3 {
+    width: 180px;
+    height: 180px;
+    background: radial-gradient(circle, #f59e0b, #ec4899);
+    top: 10%;
+    right: 5%;
+    border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+    animation-delay: 8s;
+}
+
+.shape4 {
     width: 150px;
     height: 150px;
-    top: 60%;
-    right: 10%;
-    animation-delay: -5s;
-    background: linear-gradient(45deg, rgba(16, 185, 129, 0.15), rgba(59, 130, 246, 0.15));
+    background: radial-gradient(circle, #ec4899, #a855f7);
+    bottom: 5%;
+    left: 3%;
+    animation-delay: 12s;
+    border-radius: 80% 20% 50% 50% / 50% 50% 50% 50%;
 }
 
-.shape-3 {
-    width: 80px;
-    height: 80px;
-    top: 30%;
-    left: 70%;
-    animation-delay: -10s;
-    background: linear-gradient(45deg, rgba(139, 92, 246, 0.15), rgba(16, 185, 129, 0.15));
+.shape5 {
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, #ec4899, #f59e0b);
+    top: 40%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-radius: 50% 50% 30% 70% / 60% 40% 60% 40%;
+    animation-delay: 15s;
 }
 
-@keyframes float {
-    0%,
-    100% {
-        transform: translateY(0px) rotate(0deg);
-        opacity: 0.4;
+.shape6 {
+    width: 150px;
+    height: 150px;
+    background: radial-gradient(circle, #818cf8, #3b82f6);
+    top: 5%;
+    right: 5%;
+    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+}
+
+.shape7 {
+    width: 200px;
+    height: 200px;
+    background: radial-gradient(circle, #f472b6, #a855f7);
+    bottom: 5%;
+    left: 30%;
+}
+
+@keyframes blob-move {
+    0% {
+        transform: scale(1) translate(0, 0);
+    }
+    25% {
+        transform: scale(1.1) translate(20px, -30px);
     }
     50% {
-        transform: translateY(-30px) rotate(180deg);
-        opacity: 0.8;
+        transform: scale(0.9) translate(-20px, 20px);
+    }
+    75% {
+        transform: scale(1.05) translate(10px, -10px);
+    }
+    100% {
+        transform: scale(1) translate(0, 0);
     }
 }
 
 
-/* Основные стили стеклянных элементов */
+/* Liquid Glass - светлая тема с темным текстом */
 
-.glass-container {
-    background: rgba(0, 0, 0, 0.4);
+.glass-container,
+.glass-panel,
+.liquid-glass {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 24px;
+    box-shadow: 0 10px 30px 0 rgba(0, 0, 0, 0.08);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    will-change: transform;
+    transform: translateZ(0);
+    z-index: 2;
+    color: #1f2937;
+}
+
+.glass-container::before,
+.glass-panel::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(167, 139, 250, 0.1),
+        transparent
+    );
+    transition: left 0.6s ease;
+    pointer-events: none;
+}
+
+.glass-container:hover::before,
+.glass-panel:hover::before {
+    left: 100%;
+}
+
+.glass-container:hover,
+.glass-panel:hover,
+.liquid-glass:hover {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(255, 255, 255, 0.4);
+    box-shadow: 0 15px 40px 0 rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+}
+
+
+/* Liquid Glass Input - точно как в HTML */
+
+.glass-input,
+.liquid-glass-input,
+input.glass-input,
+textarea.glass-input,
+select.glass-input {
+    background: rgba(255, 255, 255, 0.9);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 24px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.glass-container:hover {
-    background: rgba(0, 0, 0, 0.5);
-    border-color: rgba(255, 255, 255, 0.2);
-    transform: translateY(-2px);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-}
-
-
-/* Стеклянные поля ввода */
-
-.glass-input {
-    background: rgba(0, 0, 0, 0.3);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 16px;
-    color: var(--text-primary);
+    border: 2px solid rgba(109, 40, 217, 0.5);
+    box-shadow: 
+        0 2px 12px rgba(109, 40, 217, 0.15),
+        inset 0 1px 3px rgba(0, 0, 0, 0.05);
+    border-radius: 12px;
+    color: #1f2937;
     font-size: 14px;
     padding: 12px 16px;
     transition: all 0.3s ease;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-.glass-input:focus {
+.glass-input:hover,
+.liquid-glass-input:hover {
+    border-color: rgba(109, 40, 217, 0.7);
+    box-shadow: 
+        0 4px 16px rgba(109, 40, 217, 0.25),
+        inset 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.glass-input:focus,
+.liquid-glass-input:focus {
     outline: none;
-    background: rgba(0, 0, 0, 0.4);
-    border-color: var(--accent-blue);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3), 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-    transform: scale(1.02);
+    border-color: #6D28D9;
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 
+        0 0 0 3px rgba(109, 40, 217, 0.15),
+        0 4px 16px rgba(109, 40, 217, 0.2),
+        inset 0 2px 4px 0 rgba(0, 0, 0, 0.03);
 }
 
-.glass-input::placeholder {
-    color: var(--text-muted);
+.glass-input::placeholder,
+.liquid-glass-input::placeholder {
+    color: #6b7280;
 }
 
-
-/* Стеклянные кнопки */
-
-.glass-button {
-    background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+/* Highlighted Input - для размеров и себестоимости */
+.highlighted-input,
+input.highlighted-input {
+    background: rgba(236, 232, 255, 0.7);
+    border: 1px solid rgba(109, 40, 217, 0.3);
+    box-shadow: 0 0 15px rgba(109, 40, 217, 0.1), inset 0 2px 4px 0 rgba(0, 0, 0, 0.03);
     border-radius: 12px;
-    color: var(--text-primary);
+    color: #1f2937;
+    font-size: 14px;
+    padding: 12px 16px;
+    transition: all 0.3s ease;
+}
+
+.highlighted-input:focus {
+    outline: none;
+    border-color: #6D28D9;
+    box-shadow: 
+        0 0 0 2px rgba(109, 40, 217, 0.2),
+        0 0 15px rgba(109, 40, 217, 0.15),
+        inset 0 2px 4px 0 rgba(0, 0, 0, 0.03);
+}
+
+/* Textarea - светлая тема */
+textarea.glass-input {
+    min-height: 100px;
+    resize: vertical;
+    font-family: inherit;
+}
+
+/* Select - светлая тема */
+select.glass-input {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 12px center;
+    background-repeat: no-repeat;
+    background-size: 16px;
+    padding-right: 40px;
+}
+
+
+/* Кнопки "Генерировать" - фиолетовые светлые */
+
+.glass-button,
+button.glass-button {
+    background: #EDE9FE;
+    color: #6D28D9;
+    border: none;
+    border-radius: 10px;
     font-weight: 600;
     font-size: 14px;
-    padding: 12px 24px;
+    padding: 10px 16px;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .glass-button:hover {
-    background: rgba(0, 0, 0, 0.5);
-    border-color: rgba(255, 255, 255, 0.3);
-    transform: translateY(-2px) scale(1.02);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    background: #DDD6FE;
 }
 
 .glass-button:active {
-    transform: translateY(0px) scale(0.98);
+    transform: scale(0.98);
 }
 
 
-/* Акцентные кнопки */
+/* Кнопка "Создать товар" - фиолетовая primary */
 
-.glass-button-primary {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.6), rgba(37, 99, 235, 0.6));
-    border-color: rgba(59, 130, 246, 0.8);
+.glass-button-primary,
+button.glass-button-primary {
+    background: #6D28D9;
     color: white;
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
+    border: none;
     border-radius: 12px;
     font-weight: 600;
-    font-size: 14px;
-    padding: 12px 24px;
+    font-size: 15px;
+    padding: 14px 28px;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transition: all 0.3s ease;
+    box-shadow: 
+        0 4px 16px rgba(109, 40, 217, 0.4),
+        0 2px 8px rgba(109, 40, 217, 0.3);
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
+    width: 100%;
 }
 
 .glass-button-primary:hover {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.8), rgba(37, 99, 235, 0.8));
-    border-color: rgba(59, 130, 246, 1);
-    transform: translateY(-2px) scale(1.02);
-    box-shadow: 0 8px 24px rgba(59, 130, 246, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    background: #5B21B6;
+    transform: translateY(-2px);
+    box-shadow: 
+        0 6px 20px rgba(109, 40, 217, 0.5),
+        0 3px 10px rgba(109, 40, 217, 0.4);
+}
+
+.glass-button-primary:active {
+    transform: translateY(0);
 }
 
 
@@ -310,7 +486,7 @@ body {
 }
 
 
-/* Формы */
+/* Формы - Светлая тема */
 
 .form-section {
     margin-bottom: 32px;
@@ -323,15 +499,31 @@ body {
 .form-label {
     display: block;
     font-weight: 600;
-    color: var(--text-primary);
+    color: #1f2937;
     margin-bottom: 8px;
     font-size: 14px;
 }
 
 .form-hint {
     font-size: 12px;
-    color: var(--text-muted);
+    color: #6b7280;
     margin-top: 4px;
+}
+
+/* Заголовки форм */
+h1, h2, h3, h4, h5, h6 {
+    color: #1f2937;
+}
+
+/* Параграфы */
+p {
+    color: #4b5563;
+}
+
+/* Лейблы */
+label {
+    color: #1f2937;
+    font-weight: 500;
 }
 
 
@@ -440,6 +632,57 @@ body {
     }
 }
 
+.slide-up {
+    animation: slideUp 0.5s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Tailwind animate-in classes */
+.animate-in {
+    animation-fill-mode: both;
+}
+
+.duration-200 {
+    animation-duration: 200ms;
+}
+
+.duration-300 {
+    animation-duration: 300ms;
+}
+
+.duration-500 {
+    animation-duration: 500ms;
+}
+
+.fade-in {
+    animation-name: fadeIn;
+}
+
+.slide-in-from-top-2 {
+    animation-name: slideInFromTop;
+}
+
+@keyframes slideInFromTop {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 
 /* Дополнительные анимации */
 
@@ -476,6 +719,34 @@ body {
     background: linear-gradient( 90deg, rgba(255, 255, 255, 0.0) 25%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.0) 75%);
     background-size: 200% 100%;
     animation: shimmer 2s infinite;
+}
+
+/* Анимация пульсации для скелетона */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Material Symbols стили */
+.material-symbols-outlined {
+    font-variation-settings:
+        'FILL' 0,
+        'wght' 400,
+        'GRAD' 0,
+        'opsz' 24;
+    user-select: none;
+}
+
+.material-symbols-filled {
+    font-variation-settings: 'FILL' 1;
 }
 
 
@@ -768,6 +1039,54 @@ body {
 }
 
 
+/* Зоны загрузки файлов - светлая тема */
+
+.upload-zone {
+    background: 
+        linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.85) 100%),
+        rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 2px dashed rgba(167, 139, 250, 0.3);
+    border-radius: 16px;
+    padding: 32px;
+    text-align: center;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+.upload-zone:hover {
+    background: 
+        linear-gradient(135deg, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0.95) 100%),
+        rgba(255, 255, 255, 0.9);
+    border-color: rgba(139, 92, 246, 0.5);
+    box-shadow: 0 4px 16px rgba(167, 139, 250, 0.15);
+}
+
+.upload-zone-icon {
+    width: 48px;
+    height: 48px;
+    color: #8b5cf6;
+    margin-bottom: 8px;
+}
+
+.upload-zone-text {
+    color: #8b5cf6;
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.upload-zone-hint {
+    color: #6b7280;
+    font-size: 13px;
+}
+
 /* Улучшения для high-DPI экранов */
 
 @media (-webkit-min-device-pixel-ratio: 2),
@@ -780,4 +1099,61 @@ body {
         backdrop-filter: blur(15px);
         -webkit-backdrop-filter: blur(15px);
     }
+}
+
+
+/* Анимация выхода - человечек выходит и дверь закрывается */
+
+@keyframes logoutAnimation {
+    0% {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+    40% {
+        /* Человечек движется вправо */
+        opacity: 1;
+        transform: translateX(100px) scale(1);
+    }
+    60% {
+        /* Человечек почти ушел */
+        opacity: 0.3;
+        transform: translateX(150px) scale(0.8);
+    }
+    100% {
+        /* Человечек исчез */
+        opacity: 0;
+        transform: translateX(200px) scale(0.5);
+    }
+}
+
+@keyframes doorClose {
+    0% {
+        width: 100%;
+        opacity: 0;
+    }
+    30% {
+        opacity: 1;
+    }
+    100% {
+        width: 0%;
+        opacity: 1;
+    }
+}
+
+#logout-animation.animate-logout {
+    animation: logoutAnimation 1.5s ease-in-out forwards;
+    position: relative;
+}
+
+#logout-animation.animate-logout::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 100%;
+    height: 100vh;
+    background: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, 0.8) 100%);
+    animation: doorClose 1.5s ease-in-out forwards;
+    z-index: 9999;
+    pointer-events: none;
 }

@@ -4,6 +4,7 @@ import { prisma } from '../prisma'
 import { cookies } from 'next/headers'
 import { withPrismaRetry } from '../utils/retry'
 import { sessionCache } from './session-cache'
+import { createClient } from '@/lib/supabase/server'
 
 export interface AuthUser {
   id: string
@@ -19,31 +20,66 @@ export class AuthService {
    * Получить текущего пользователя из реальной базы данных
    */
   static async getCurrentUser(): Promise<AuthUser | null> {
-    console.log('🔍 [AuthService] === НАЧАЛО getCurrentUser (Production) ===')
-    
     try {
+      // ВАРИАНТ 1: Проверяем Supabase Auth (новая система)
+      const supabase = createClient();
+      const { data: { user: supabaseUser }, error: supabaseError } = await supabase.auth.getUser();
+      
+      if (supabaseUser && !supabaseError) {
+        console.log('✅ [AuthService] Найдена сессия Supabase, ищем пользователя в БД...');
+        
+        // Ищем пользователя по supabaseId
+        let user = await prisma.user.findFirst({
+          where: { supabaseId: supabaseUser.id }
+        });
+        
+        // Если пользователя нет - создаем автоматически
+        if (!user) {
+          console.log('👤 [AuthService] Создаем пользователя автоматически...');
+          user = await prisma.user.create({
+            data: {
+              supabaseId: supabaseUser.id,
+              email: supabaseUser.email || '',
+              name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'Пользователь',
+              role: 'USER',
+              isActive: true,
+              emailVerified: new Date(),
+              balance: 0
+            }
+          });
+          console.log('✅ [AuthService] Пользователь создан автоматически:', user.email);
+        }
+        
+        if (user && user.isActive) {
+          console.log('✅ [AuthService] Пользователь найден через Supabase:', user.email);
+          
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name || undefined,
+            avatarUrl: user.avatarUrl || undefined,
+            role: user.role,
+            isActive: user.isActive
+          };
+        }
+      }
+      
+      // ВАРИАНТ 2: Проверяем старую систему с session_token (для обратной совместимости)
       const cookieStore = cookies()
       const token = cookieStore.get('session_token')?.value
-      console.log('🔍 [AuthService] Session token:', token ? `${token.substring(0, 10)}...` : 'не найден')
       
       if (!token) {
-        console.log('🔍 [AuthService] No session token found')
+        console.log('🔍 [AuthService] Ни одна сессия не найдена')
         return null
       }
 
       // Проверяем кеш сначала
       const cachedUser = sessionCache.get(token);
       if (cachedUser) {
-        console.log('⚡ [AuthService] Пользователь найден в кеше:', cachedUser.email);
         return cachedUser;
       }
 
-      // Подключаемся к БД и ищем сессию
-      console.log('🔍 [AuthService] Connecting to Supabase PostgreSQL...')
-      
-      // Prisma уже подключен как singleton, просто проверяем готовность
-      console.log('✅ [AuthService] Using existing Prisma connection')
-      
+      // Ищем сессию в БД
       const session = await withPrismaRetry(async () => {
         return await prisma.session.findUnique({
           where: { token },
@@ -60,15 +96,7 @@ export class AuthService {
             }
           }
         });
-      }, 'getCurrentUser - find session')
-
-      console.log('🔍 [AuthService] Session search result:', session ? {
-        sessionId: session.id,
-        userId: session.userId,
-        expiresAt: session.expiresAt,
-        userEmail: session.user.email,
-        userActive: session.user.isActive
-      } : 'не найдена')
+      }, 'getCurrentUser')
 
       if (!session) {
         console.log('🔍 [AuthService] Session not found in database')
@@ -210,16 +238,21 @@ export class AuthService {
     console.log('🔐 [AuthService] Destroying session:', token.substring(0, 10) + '...')
     
     try {
-      await prisma.session.delete({ where: { token } })
+      // Используем deleteMany вместо delete чтобы не падать если сессия не найдена
+      const result = await prisma.session.deleteMany({ where: { token } })
+      
+      if (result.count > 0) {
+        console.log('✅ [AuthService] Session deleted successfully')
+      } else {
+        console.log('⚠️ [AuthService] Session not found, but continuing...')
+      }
       
       // Удаляем из кеша
       sessionCache.delete(token);
       
-      console.log('✅ [AuthService] Session deleted successfully')
-      
     } catch (error) {
       console.error('❌ [AuthService] Error destroying session:', error)
-      throw error
+      // Не выбрасываем ошибку - просто логируем и продолжаем
     }
   }
 

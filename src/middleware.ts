@@ -1,26 +1,57 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname
   
-  // Защищенные маршруты
-  const protectedPaths = ['/', '/products', '/cabinets', '/analytics']
-  const authPaths = ['/auth/login', '/auth/register']
+  // Публичные пути - не требуют авторизации
+  const publicPaths = ['/auth/login', '/auth/register', '/auth/telegram-desktop', '/auth/callback']
   
-  // Проверяем наличие session_token cookie
-  const hasSession = request.cookies.has('session_token')
+  // Проверяем наличие session_token cookie (старая система)
+  const sessionToken = request.cookies.get('session_token')?.value
+  
+  // Проверяем Supabase Auth (новая система)
+  let supabaseUser = null
+  try {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return request.cookies.get(name)?.value
+          },
+          set() {},
+          remove() {},
+        },
+      }
+    )
+    
+    const { data: { user } } = await supabase.auth.getUser()
+    supabaseUser = user
+  } catch (error) {
+    console.log('🔒 Middleware: Ошибка проверки Supabase:', error)
+  }
+  
+  const isAuthenticated = !!sessionToken || !!supabaseUser
+  
+  console.log(`🔒 Middleware: path=${path}, sessionToken=${!!sessionToken}, supabaseUser=${!!supabaseUser}`)
+  
+  // Если это публичный путь - пропускаем
+  if (publicPaths.some(p => path === p || path.startsWith(p + '/'))) {
+    // Если пользователь авторизован и пытается открыть страницу входа
+    if (isAuthenticated && (path === '/auth/login' || path === '/auth/register')) {
+      console.log('🔒 Middleware: Авторизованный пользователь пытается открыть страницу входа, редирект на главную')
+      return NextResponse.redirect(new URL('/', request.url))
+    }
+    return NextResponse.next()
+  }
   
   // Если пользователь не авторизован и пытается получить доступ к защищенному маршруту
-  if (!hasSession && protectedPaths.some(p => path === p || path.startsWith(p + '/'))) {
-    console.log('🔒 Middleware: Перенаправление на логин для пути:', path)
+  if (!isAuthenticated) {
+    console.log('🔒 Middleware: Нет авторизации, редирект на логин для пути:', path)
     return NextResponse.redirect(new URL('/auth/login', request.url))
-  }
-
-  // Если пользователь авторизован и пытается получить доступ к странице авторизации
-  if (hasSession && authPaths.includes(path)) {
-    console.log('🔒 Middleware: Перенаправление на главную для авторизованного пользователя')
-    return NextResponse.redirect(new URL('/', request.url))
   }
 
   return NextResponse.next()

@@ -1,7 +1,7 @@
-import { createClient } from './../../../../lib/supabase/server'
-import { AuthService } from './../../../../lib/auth/auth-service'
+import { createClient } from '@/lib/supabase/server'
+import { AuthService } from '@/lib/auth/auth-service'
 import { NextResponse } from 'next/server'
-import { prisma } from './../../../../lib/prisma'
+import { prisma } from '@/lib/prisma'
 
 export async function GET() {
   try {
@@ -66,15 +66,11 @@ export async function PUT(request: Request) {
       }
     })
 
-    await AuthService.logAction(
-      user.id,
-      'update_profile',
-      'user',
-      user.id,
-      { changes: { name, avatarUrl } },
-      request.headers.get('x-forwarded-for') || undefined,
-      request.headers.get('user-agent') || undefined
-    )
+    // Логирование обновления профиля
+    console.log('📝 User profile updated:', {
+      userId: user.id,
+      changes: { name, avatarUrl }
+    })
 
     return NextResponse.json(updatedUser)
   } catch (error) {

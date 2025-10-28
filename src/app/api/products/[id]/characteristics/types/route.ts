@@ -1,8 +1,7 @@
 // src/app/api/categories/[id]/characteristics/types/route.ts - ИСПРАВЛЕННАЯ ВЕРСИЯ
 
 import { NextRequest, NextResponse } from 'next/server';
-import { unifiedCharacteristicsService } from '../../../../../../../lib/services/unifiedCharacteristicsService';
-import { localCategoriesService } from '../../../../../../../lib/services/localCategoriesService';
+import { localCategoriesService } from '@/lib/services/localCategoriesService';
 
 // Интерфейсы для типизации
 interface CharacteristicType {

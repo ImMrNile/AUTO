@@ -1,9 +1,10 @@
 // src/app/api/products/[id]/route.ts - ИСПРАВЛЕННАЯ ВЕРСИЯ
 
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma, safePrismaOperation } from '@/lib/prisma';
-import { AuthService } from '@/lib/auth/auth-service';
-import { unifiedAISystem } from '@/lib/services/unifiedAISystem';
+import { prisma } from '../../../../../lib/prisma';
+import { safePrismaOperation } from '../../../../../lib/prisma-utils';
+import { AuthService } from '../../../../../lib/auth/auth-service';
+import { unifiedAISystem } from '../../../../../lib/services/unifiedAISystem';
 
 // GET метод для получения полной информации о товаре
 export async function GET(
@@ -236,6 +237,66 @@ export async function GET(
       errorCategory,
       details: errorDetails,
       timestamp: new Date().toISOString()
+    }, { status: 500 });
+  }
+}
+
+// PATCH метод для частичного обновления товара
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    console.log(`✏️ Частичное обновление товара ID: ${params.id}`);
+
+    const user = await AuthService.getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ 
+        error: 'Не авторизован'
+      }, { status: 401 });
+    }
+
+    const updateData = await request.json();
+    
+    console.log(`📝 Данные для обновления:`, {
+      stock: updateData.stock,
+      price: updateData.price,
+      discountPrice: updateData.discountPrice,
+      costPrice: updateData.costPrice,
+      generatedName: updateData.generatedName ? '✓' : '✗',
+      seoDescription: updateData.seoDescription ? '✓' : '✗'
+    });
+    
+    // Обновление товара
+    const updatedProduct = await safePrismaOperation(
+      () => prisma.product.update({
+        where: { 
+          id: params.id,
+          userId: user.id // Проверка принадлежности
+        },
+        data: {
+          ...updateData,
+          updatedAt: new Date()
+        }
+      }),
+      'обновление товара'
+    );
+
+    console.log(`✅ Товар ${params.id} обновлен. Новый stock: ${updatedProduct.stock}`);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Товар успешно обновлен',
+      product: updatedProduct
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка обновления товара:', error);
+    
+    return NextResponse.json({
+      success: false,
+      error: 'Ошибка обновления товара',
+      details: error instanceof Error ? error.message : 'Неизвестная ошибка'
     }, { status: 500 });
   }
 }

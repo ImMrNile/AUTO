@@ -1,8 +1,9 @@
 // src/app/api/wb/characteristics/[categoryId]/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma, safePrismaOperation } from '@/lib/prisma';
-import { AuthService } from '@/lib/auth/auth-service';
+import { prisma } from '../../../../../../lib/prisma';
+import { safePrismaOperation } from '../../../../../../lib/prisma-utils';
+import { AuthService } from '../../../../../../lib/auth/auth-service';
 
 export async function GET(
   request: NextRequest,
@@ -28,15 +29,12 @@ export async function GET(
       }, { status: 400 });
     }
 
-    // Загрузка категории с характеристиками
+    // ИСПРАВЛЕНИЕ: Улучшенная загрузка категории с ВСЕМИ характеристиками
+    console.log(`🔍 [Characteristics API] Поиск категории по ID: ${categoryId}`);
+    
     const category = await safePrismaOperation(
-      () => prisma.wbSubcategory.findFirst({
-        where: {
-          OR: [
-            { id: categoryId },
-            { wbSubjectId: categoryId }
-          ]
-        },
+      () => prisma.wbSubcategory.findUnique({
+        where: { id: categoryId },
         include: {
           parentCategory: true,
           characteristics: {
@@ -56,8 +54,38 @@ export async function GET(
       }),
       'загрузка категории с характеристиками'
     );
-
+    
+    // Если не найдена по ID, пробуем по wbSubjectId
+    let fallbackCategory = null;
     if (!category) {
+      console.log(`⚠️ [Characteristics API] Категория не найдена по ID ${categoryId}, пробуем по wbSubjectId...`);
+      fallbackCategory = await safePrismaOperation(
+        () => prisma.wbSubcategory.findFirst({
+          where: { wbSubjectId: categoryId },
+          include: {
+            parentCategory: true,
+            characteristics: {
+              include: {
+                values: {
+                  where: { isActive: true },
+                  orderBy: { sortOrder: 'asc' }
+                }
+              },
+              orderBy: [
+                { isRequired: 'desc' },
+                { sortOrder: 'asc' },
+                { name: 'asc' }
+              ]
+            }
+          }
+        }),
+        'загрузка категории по wbSubjectId'
+      );
+    }
+    
+    const finalCategory = category || fallbackCategory;
+
+    if (!finalCategory) {
       return NextResponse.json({
         success: false,
         error: 'Категория не найдена'
@@ -65,7 +93,7 @@ export async function GET(
     }
 
     // Обработка характеристик
-    const processedCharacteristics = category.characteristics.map((char: any) => ({
+    const processedCharacteristics = finalCategory.characteristics.map((char: any) => ({
       id: char.wbCharacteristicId || char.id,
       wbCharacteristicId: char.wbCharacteristicId,
       name: char.name,
@@ -98,18 +126,26 @@ export async function GET(
     );
 
     console.log(`✅ Загружено характеристик: ${processedCharacteristics.length} общих, ${aiCharacteristics.length} для ИИ`);
+    console.log(`📋 [Characteristics API] Исходные характеристики из БД: ${finalCategory.characteristics.length}`);
+    console.log(`📋 [Characteristics API] Первые 5 характеристик:`, finalCategory.characteristics.slice(0, 5).map(c => ({
+      id: c.id,
+      wbCharacteristicId: c.wbCharacteristicId,
+      name: c.name,
+      type: c.type,
+      isRequired: c.isRequired
+    })));
 
     return NextResponse.json({
       success: true,
       category: {
-        id: category.id,
-        name: category.name,
-        slug: category.slug,
-        wbSubjectId: category.wbSubjectId,
-        parentCategory: category.parentCategory ? {
-          id: category.parentCategory.id,
-          name: category.parentCategory.name,
-          slug: category.parentCategory.slug
+        id: finalCategory.id,
+        name: finalCategory.name,
+        slug: finalCategory.slug,
+        wbSubjectId: finalCategory.wbSubjectId,
+        parentCategory: finalCategory.parentCategory ? {
+          id: finalCategory.parentCategory.id,
+          name: finalCategory.parentCategory.name,
+          slug: finalCategory.parentCategory.slug
         } : null
       },
       characteristics: processedCharacteristics,

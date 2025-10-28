@@ -20,38 +20,11 @@ export default async function ProtectedLayout({
     redirect('/auth/login')
   }
 
+  // УБРАЛИ проверку кабинетов из layout - она теперь на клиенте в page.tsx
+
   return (
-    <div>
-      <nav style={{
-        background: '#0f172a',
-        color: 'white',
-        padding: '12px 24px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div style={{ fontSize: 18, fontWeight: 600 }}>WB Automation</div>
-        <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
-          <span>{currentUser.email}</span>
-          <form action="/auth/logout" method="POST">
-            <button
-              type="submit"
-              style={{
-                background: 'transparent',
-                border: '1px solid white',
-                color: 'white',
-                padding: '6px 12px',
-                borderRadius: 6,
-                cursor: 'pointer',
-                fontSize: 14
-              }}
-            >
-              Выход
-            </button>
-          </form>
-        </div>
-      </nav>
+    <>
       {children}
-    </div>
+    </>
   )
 }

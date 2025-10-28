@@ -1,6 +1,6 @@
 // src/app/api/check-vendor-code/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '../../../lib/prisma';
+import { prisma } from '@/lib/prisma';
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,9 +19,7 @@ export async function GET(request: NextRequest) {
     // Проверяем в нашей базе данных
     const existingProduct = await prisma.product.findFirst({
       where: {
-        wbData: {
-          contains: vendorCode
-        }
+        vendorCode: vendorCode
       },
       select: {
         id: true,

@@ -2,10 +2,21 @@ import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { AuthProvider } from './components/AuthProvider'
+import { TaskProvider } from './components/BackgroundTasks/TaskProvider'
+import TaskNotificationsWrapper from './components/BackgroundTasks/TaskNotificationsWrapper'
+import BackgroundProductLoader from './components/BackgroundProductLoader'
+import BackgroundTaskInitializer from './components/BackgroundTaskInitializer'
+import CookieConsent from './components/CookieConsent'
+import AuthGuard from './components/AuthGuard'
 
 const inter = Inter({ 
   subsets: ['latin', 'cyrillic'],
-  display: 'swap'
+  display: 'swap',
+  fallback: ['system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Arial', 'sans-serif'],
+  adjustFontFallback: true,
+  preload: true,
+  variable: '--font-inter',
+  weight: ['400', '500', '600', '700']
 })
 
 export const metadata: Metadata = {
@@ -48,51 +59,118 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className={inter.className}>
-        <div id="app-container">
-          {/* Анимированный фон с фигурами */}
-          <div className="animated-background"></div>
-          <div className="floating-shapes">
-            <div className="floating-shape shape-1"></div>
-            <div className="floating-shape shape-2"></div>
-            <div className="floating-shape shape-3"></div>
-            
-            {/* Дополнительные анимированные элементы */}
+        <div id="app-container" style={{ background: '#ffffff' }}>
+          {/* Квадратные элементы внизу - без анимации */}
+          <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
             <div 
-              className="floating-shape" 
               style={{
-                width: '60px',
-                height: '60px',
-                top: '80%',
-                left: '15%',
-                animationDelay: '-15s',
-                background: 'linear-gradient(45deg, rgba(59, 130, 246, 0.08), rgba(16, 185, 129, 0.08))',
-                borderRadius: '30%'
-              }}
-            ></div>
-            
-            <div 
-              className="floating-shape" 
-              style={{
+                position: 'absolute',
                 width: '120px',
                 height: '120px',
-                top: '20%',
-                right: '25%',
-                animationDelay: '-8s',
-                background: 'linear-gradient(45deg, rgba(139, 92, 246, 0.06), rgba(59, 130, 246, 0.06))',
-                borderRadius: '60%'
+                bottom: '8%',
+                left: '12%',
+                background: 'radial-gradient(circle, #ec4899, #f59e0b)',
+                borderRadius: '18px',
+                opacity: 1
               }}
             ></div>
             
             <div 
-              className="floating-shape" 
               style={{
-                width: '40px',
-                height: '40px',
-                top: '50%',
-                left: '5%',
+                position: 'absolute',
+                width: '100px',
+                height: '100px',
+                bottom: '15%',
+                right: '15%',
+                background: 'radial-gradient(circle, #3b82f6, #a855f7)',
+                borderRadius: '15px',
+                opacity: 1
+              }}
+            ></div>
+            
+            <div 
+              style={{
+                position: 'absolute',
+                width: '110px',
+                height: '110px',
+                bottom: '5%',
+                left: '35%',
+                background: 'radial-gradient(circle, #10b981, #3b82f6)',
+                borderRadius: '20px',
+                opacity: 1
+              }}
+            ></div>
+          </div>
+          
+          {/* Все шейпы БЕЗ blur - четкие и яркие */}
+          {/* Blur применяется ТОЛЬКО через backdrop-filter на ликвид гласс элементах */}
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1, pointerEvents: 'none' }}>
+            <div className="shape shape2"></div>
+            <div className="shape shape4"></div>
+            
+            {/* Дополнительные мелкие шарики */}
+            <div 
+              className="shape" 
+              style={{
+                width: '100px',
+                height: '100px',
+                top: '60%',
+                right: '8%',
+                animationDelay: '-7s',
+                background: 'radial-gradient(circle, #10b981, #3b82f6)',
+                borderRadius: '50%'
+              }}
+            ></div>
+            
+            <div 
+              className="shape" 
+              style={{
+                width: '90px',
+                height: '90px',
+                bottom: '20%',
+                left: '25%',
                 animationDelay: '-12s',
-                background: 'linear-gradient(45deg, rgba(16, 185, 129, 0.1), rgba(139, 92, 246, 0.1))',
-                borderRadius: '20%'
+                background: 'radial-gradient(circle, #f59e0b, #ec4899)',
+                borderRadius: '18px'
+              }}
+            ></div>
+            
+            <div 
+              className="shape" 
+              style={{
+                width: '110px',
+                height: '110px',
+                top: '35%',
+                left: '8%',
+                animationDelay: '-5s',
+                background: 'radial-gradient(circle, #6366f1, #a855f7)',
+                borderRadius: '22px'
+              }}
+            ></div>
+            
+            <div 
+              className="shape" 
+              style={{
+                width: '95px',
+                height: '95px',
+                top: '45%',
+                right: '20%',
+                animationDelay: '-9s',
+                background: 'radial-gradient(circle, #ec4899, #f59e0b)',
+                borderRadius: '50%'
+              }}
+            ></div>
+            
+            <div 
+              className="shape" 
+              style={{
+                width: '85px',
+                height: '85px',
+                bottom: '35%',
+                right: '12%',
+                animationDelay: '-15s',
+                background: 'radial-gradient(circle, #3b82f6, #10b981)',
+                borderRadius: '50%'
               }}
             ></div>
           </div>
@@ -131,14 +209,26 @@ export default function RootLayout({
           {/* Основной контент */}
           <div style={{
             position: 'relative',
-            zIndex: 1,
+            zIndex: 2,
             minHeight: '100vh',
             display: 'flex',
             flexDirection: 'column'
           }}>
-            <AuthProvider>
-              {children}
-            </AuthProvider>
+            <AuthGuard>
+              <AuthProvider>
+                <TaskProvider>
+                  {children}
+                  {/* Инициализация фоновых задач */}
+                  <BackgroundTaskInitializer />
+                  {/* Глобальные уведомления о задачах */}
+                  <TaskNotificationsWrapper />
+                  {/* Фоновая загрузка товаров */}
+                  <BackgroundProductLoader />
+                  {/* Cookie Consent Banner */}
+                  <CookieConsent />
+                </TaskProvider>
+              </AuthProvider>
+            </AuthGuard>
           </div>
         </div>
       </body>

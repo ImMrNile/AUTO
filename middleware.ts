@@ -164,6 +164,3 @@ export class MiddlewareUtils {
     };
   }
 }
-
-// Экспорт конфигурации для использования в других местах
-export { CORS_CONFIG, RATE_LIMIT_CONFIG };

@@ -1,0 +1,17 @@
+node_modules
+.next
+dist
+*/dist
+**/*.js
+!next.config.js
+!eslint.config.mjs
+!postcss.config.js
+!tailwind.config.js
+.env
+.env.local
+.DS_Store
+*.log
+.vercel
+
+# Local Netlify folder
+.netlify

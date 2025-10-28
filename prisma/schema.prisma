@@ -3,31 +3,40 @@ generator client {
 }
 
 datasource db {
-  provider     = "postgresql"
-  url          = env("DATABASE_URL")
-  relationMode = "prisma"
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
-  id            String     @id @default(cuid())
-  email         String     @unique
-  name          String?
-  avatarUrl     String?
-  role          UserRole   @default(USER)
-  isActive      Boolean    @default(true)
-  supabaseId    String     @unique
-  lastLoginAt   DateTime?
-  emailVerified DateTime?
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
-  products      Product[]
-  cabinets      Cabinet[]
-  sessions      Session[]
-  apiKeys       ApiKey[]
-  auditLogs     AuditLog[]
+  id               String     @id @default(cuid())
+  email            String     @unique
+  name             String?
+  avatarUrl        String?
+  role             UserRole   @default(USER)
+  isActive         Boolean    @default(true)
+  supabaseId       String     @unique
+  balance          Float      @default(0) // Баланс пользователя в рублях
+  lastLoginAt      DateTime?
+  emailVerified    DateTime?
+  // Telegram OAuth данные
+  telegramId       String?    @unique // Telegram User ID
+  telegramUsername String?    // Telegram username
+  telegramPhotoUrl String?    // Telegram profile photo
+  telegramAuthDate DateTime?  // Дата последней авторизации через Telegram
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  products         Product[]
+  cabinets         Cabinet[]
+  sessions         Session[]
+  apiKeys          ApiKey[]
+  auditLogs        AuditLog[]
+  creationTasks    ProductCreationTask[]
+  telegramSessions TelegramSession[]
 
   @@index([email])
   @@index([supabaseId])
+  @@index([telegramId])
   @@map("users")
 }
 
@@ -105,6 +114,36 @@ model Product {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   subcategoryId       Int?
+  
+  // WB Product Data
+  wbNmId              String?              // Wildberries nmID
+  wbImtId             String?              // Wildberries imtID
+  vendorCode          String?              // Артикул продавца
+  brand               String?              // Бренд
+  
+  // Pricing
+  costPrice           Float?               // Себестоимость
+  discountPrice       Float?               // Цена со скидкой
+  discount            Float?               // Процент скидки
+  priceLocked         Boolean              @default(false) // Закрепление цены (защита от автоснижения WB)
+  lockedPrice         Float?               // Закрепленная цена
+  
+  // Stock Information
+  stock               Int                  @default(0)  // Остаток на складе
+  reserved            Int                  @default(0)  // Зарезервировано
+  inTransit           Int                  @default(0)  // В пути к клиенту
+  inReturn            Int                  @default(0)  // Возвраты
+  
+  // Sizes and variants
+  sizes               Json?                // Размеры и их остатки
+  
+  // Packaging and Kit
+  packaging           String?              // Комплектация товара
+  
+  // WB Sync
+  lastWbSyncAt        DateTime?            // Последняя синхронизация с WB
+  wbSyncStatus        String?              // Статус синхронизации
+  
   user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   productCabinets     ProductCabinet[]
   subcategory         WbSubcategory?       @relation(fields: [subcategoryId], references: [id])
@@ -112,13 +151,18 @@ model Product {
   agentExecutions     AgentExecutionLog[]
   gpt5SearchLogs      GPT5SearchLog[]
   gpt5AnalysisResults GPT5AnalysisResult[]
+  characteristics     ProductCharacteristic[]
   infographics        ProductInfographic[]
   infographicRequests InfographicRequest[]
   publications        ProductPublication[]
+  creationTasks       ProductCreationTask[]
+  analytics           ProductAnalytics?
 
   @@index([userId])
   @@index([status])
   @@index([createdAt])
+  @@index([wbNmId])
+  @@index([vendorCode])
   @@map("products")
 }
 
@@ -131,6 +175,7 @@ model Cabinet {
   isActive        Boolean              @default(true)
   sellerId        String?
   shopName        String?
+  taxRate         Float?               @default(6) // Налоговая ставка (УСН 6%, 15%, 25% и т.д.)
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
   user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -173,7 +218,7 @@ model ProductCabinet {
   cabinetId  String
   isSelected Boolean  @default(true)
   createdAt  DateTime @default(now())
-  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product    Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
   cabinet    Cabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
 
   @@unique([productId, cabinetId])
@@ -243,6 +288,7 @@ model WbCategoryCharacteristic {
   updatedAt          DateTime                @updatedAt
   subcategory        WbSubcategory           @relation(fields: [subcategoryId], references: [id], onDelete: Cascade)
   values             WbCharacteristicValue[]
+  productCharacteristics ProductCharacteristic[]
 
   @@index([subcategoryId])
   @@map("wb_category_characteristics")
@@ -360,34 +406,35 @@ model GPT5SearchLog {
 }
 
 model GPT5AnalysisResult {
-  id                      String   @id @default(cuid())
+  id                      String                 @id @default(cuid())
   productId               String
   workflowId              String
   agent1Data              Json
   agent2Data              Json
   agent3Data              Json
-  totalCharacteristics    Int      @default(0)
-  filledCharacteristics   Int      @default(0)
+  totalCharacteristics    Int                    @default(0)
+  filledCharacteristics   Int                    @default(0)
   fillPercentage          Float?
   overallConfidence       Float?
-  searchQueriesCount      Int      @default(0)
-  uniqueSourcesFound      Int      @default(0)
-  highQualitySourcesCount Int      @default(0)
+  searchQueriesCount      Int                    @default(0)
+  uniqueSourcesFound      Int                    @default(0)
+  highQualitySourcesCount Int                    @default(0)
   totalProcessingTime     Int?
   agent1ProcessingTime    Int?
   agent2ProcessingTime    Int?
   agent3ProcessingTime    Int?
-  totalTokensUsed         Int      @default(0)
-  totalApiCalls           Int      @default(0)
+  totalTokensUsed         Int                    @default(0)
+  totalApiCalls           Int                    @default(0)
   estimatedCost           Float?
   validationErrors        Json?
   dataQualityScore        Int?
-  readyForPublication     Boolean  @default(false)
+  readyForPublication     Boolean                @default(false)
   comparedToOptimized     Json?
   comparedToLegacy        Json?
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
-  product                 Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  product                 Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+  characteristics         ProductCharacteristic[]
 
   @@index([productId])
   @@index([workflowId])
@@ -395,6 +442,47 @@ model GPT5AnalysisResult {
   @@index([dataQualityScore])
   @@index([createdAt])
   @@map("gpt5_analysis_results")
+}
+
+model ProductCharacteristic {
+  id                    String              @id @default(cuid())
+  productId             String
+  analysisResultId      String?
+  characteristicId      Int?
+  wbCharacteristicId    Int?
+  name                  String
+  value                 String?
+  originalValue         String?
+  confidence            Float               @default(0)
+  mappingConfidence     Float               @default(0)
+  combinedConfidence    Float               @default(0)
+  source                String?
+  mappingReasoning      String?
+  detectedType          String?
+  expectedType          String?
+  typeCompatible        Boolean             @default(false)
+  isRequired            Boolean             @default(false)
+  validationStatus      String?
+  transformationApplied String?
+  qualityIndicators     Json?
+  alternatives          Json?
+  possibleValues        Json?
+  recommendedAction     String?
+  isUserModified        Boolean             @default(false)
+  userModifiedAt        DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  product               Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  analysisResult        GPT5AnalysisResult? @relation(fields: [analysisResultId], references: [id], onDelete: SetNull)
+  wbCharacteristic      WbCategoryCharacteristic? @relation(fields: [characteristicId], references: [id], onDelete: SetNull)
+
+  @@unique([productId, characteristicId])
+  @@index([productId])
+  @@index([analysisResultId])
+  @@index([characteristicId])
+  @@index([confidence])
+  @@index([validationStatus])
+  @@map("product_characteristics")
 }
 
 model ProductInfographic {
@@ -498,4 +586,89 @@ enum PublicationStatus {
   PUBLISHED
   FAILED
   UNPUBLISHED
+}
+
+model ProductCreationTask {
+  id            String                @id @default(cuid())
+  userId        String
+  productId     String?
+  productName   String
+  status        ProductCreationStatus @default(CREATING)
+  progress      Int                   @default(0)
+  currentStage  String?
+  errorMessage  String?
+  metadata      Json?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  completedAt   DateTime?
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product       Product?              @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("product_creation_tasks")
+}
+
+enum ProductCreationStatus {
+  CREATING
+  ANALYZING
+  PUBLISHING
+  COMPLETED
+  ERROR
+}
+
+model ProductAnalytics {
+  id                String   @id @default(cuid())
+  productId         String   @unique
+  nmId              String?  // Wildberries nmID
+  
+  // Конверсия
+  views             Int      @default(0)  // Просмотры
+  addToCart         Int      @default(0)  // Добавлений в корзину
+  orders            Int      @default(0)  // Заказы
+  ctr               Float    @default(0)  // CTR (%)
+  conversionRate    Float    @default(0)  // Конверсия корзина -> заказ (%)
+  
+  // Поисковые запросы (топ-10)
+  topSearchQueries  Json?    // [{query: string, openCard: number, addToCart: number, orders: number, avgPosition: number}]
+  totalQueries      Int      @default(0)  // Общее количество запросов
+  
+  // Продажи (за последние 30 дней)
+  revenue           Float    @default(0)  // Выручка
+  units             Int      @default(0)  // Проданных единиц
+  avgOrderValue     Float    @default(0)  // Средний чек
+  
+  // Метаданные синхронизации
+  lastSyncAt        DateTime @default(now())
+  syncStatus        String   @default("pending") // pending, syncing, success, error
+  syncError         String?
+  dataSource        String   @default("wb_api") // wb_api, manual, estimated
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  @@index([productId])
+  @@index([nmId])
+  @@index([lastSyncAt])
+  @@index([syncStatus])
+  @@map("product_analytics")
+}
+
+model TelegramSession {
+  id            String   @id @default(cuid())
+  sessionId     String   @unique
+  userId        String?
+  authenticated Boolean  @default(false)
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("telegram_sessions")
 }

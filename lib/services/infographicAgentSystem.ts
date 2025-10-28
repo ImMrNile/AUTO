@@ -56,18 +56,23 @@ interface AgentLog {
 }
 
 export class InfographicAgentSystem {
-  private openai: OpenAI;
+  private openai: OpenAI | null = null;
   private agentLogs: AgentLog[] = [];
 
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      throw new Error('OPENAI_API_KEY не найден в переменных окружения');
+      console.warn('⚠️ OPENAI_API_KEY не найден. Infographic функции будут недоступны.');
+      return;
     }
     this.openai = new OpenAI({ apiKey });
   }
 
   async generateProductInfographics(input: InfographicInput): Promise<InfographicResult> {
+    if (!this.openai) {
+      throw new Error('OpenAI client не инициализирован. Проверьте OPENAI_API_KEY.');
+    }
+    
     const startTime = Date.now();
     this.agentLogs = [];
     
@@ -215,10 +220,10 @@ class PromptCreationAgent {
     const prompt = this.createProductAnalysisPrompt();
     
     const response = await this.openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-5',
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2,
-      max_completion_tokens: 3000,
+      temperature: 1,
+      max_completion_tokens: 7000,
       response_format: { type: "json_object" }
     });
 
@@ -288,6 +293,13 @@ ${this.input.seoDescription}
 
 ЗАДАЧА: Определи 3-4 ключевых информационных блока для инфографики.
 
+ВАЖНЫЕ ПРАВИЛА ДЛЯ АНАЛИЗА:
+1. Для внешних аккумуляторов (power bank): фокус на емкости, времени зарядки, количестве портов, скорости зарядки
+2. Для электроники: подчеркивай технические преимущества, совместимость, гарантию
+3. Для всех товаров: выделяй уникальные особенности, которые отличают от конкурентов
+4. Используй простой и понятный язык для покупателей
+5. Избегай технических терминов без объяснения
+
 ФОРМАТ ОТВЕТА (JSON):
 {
   "keySellingPoints": ["главное преимущество 1", "преимущество 2", "преимущество 3"],
@@ -304,6 +316,11 @@ ${this.input.seoDescription}
   "contentPriority": {
     "mainImage": "что показать на главной инфографике",
     "additionalAngles": ["что показать на ракурсе 1", "на ракурсе 2"]
+  },
+  "specialRequirements": {
+    "maxTextLength": 100,
+    "avoidTechnicalJargon": true,
+    "focusOnBenefits": true
   }
 }`;
   }

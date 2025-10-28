@@ -44,13 +44,13 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
   );
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg w-full max-w-4xl h-full max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="liquid-glass w-full max-w-4xl h-full max-h-[90vh] flex flex-col">
         {/* Заголовок */}
-        <div className="flex items-center justify-between p-6 border-b">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div>
-            <h2 className="text-2xl font-bold text-gray-800">Карточка товара создана!</h2>
-            <p className="text-gray-600 mt-1">{message}</p>
+            <h2 className="text-2xl font-bold text-gray-900">Карточка товара создана!</h2>
+            <p className="text-gray-700 mt-1">{message}</p>
           </div>
           
           <button
@@ -62,7 +62,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
         </div>
 
         {/* Панель действий */}
-        <div className="px-6 py-4 border-b bg-gray-50">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50">
           <div className="flex items-center justify-between">
             {/* Табы */}
             <div className="flex gap-2">
@@ -97,7 +97,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
           {activeTab === 'overview' && (
             <div className="space-y-6">
               {/* Статус карточки */}
-              <div className="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-6">
+              <div className="liquid-glass bg-gradient-to-r from-green-50/50 to-blue-50/50 border border-green-200 p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center">
@@ -127,7 +127,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
 
               {/* Ключевые метрики */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white p-4 rounded-lg border shadow-sm">
+                <div className="liquid-glass p-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-2xl font-bold text-blue-600">{imagesCount?.total || 1}</div>
@@ -137,7 +137,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
                   </div>
                 </div>
 
-                <div className="bg-white p-4 rounded-lg border shadow-sm">
+                <div className="liquid-glass p-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-2xl font-bold text-purple-600">
@@ -149,7 +149,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
                   </div>
                 </div>
 
-                <div className="bg-white p-4 rounded-lg border shadow-sm">
+                <div className="liquid-glass p-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-2xl font-bold text-green-600">{wbSubjectId}</div>
@@ -159,7 +159,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
                   </div>
                 </div>
 
-                <div className="bg-white p-4 rounded-lg border shadow-sm">
+                <div className="liquid-glass p-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-2xl font-bold text-orange-600">98%</div>
@@ -173,7 +173,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
               {/* Информация о товаре */}
               <div className="grid lg:grid-cols-2 gap-6">
                 {/* Левая колонка */}
-                <div className="bg-white p-6 rounded-lg border shadow-sm">
+                <div className="liquid-glass p-6">
                   <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                     <Package className="w-5 h-5 text-blue-500" />
                     Основная информация
@@ -219,7 +219,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
                 </div>
 
                 {/* Правая колонка */}
-                <div className="bg-white p-6 rounded-lg border shadow-sm">
+                <div className="liquid-glass p-6">
                   <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                     <TrendingUp className="w-5 h-5 text-green-500" />
                     Прогноз эффективности
@@ -261,7 +261,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
               </div>
 
               {/* НОВЫЕ кнопки действий */}
-              <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-6 rounded-lg border border-blue-200">
+              <div className="liquid-glass bg-gradient-to-r from-blue-50/50 to-purple-50/50 border border-blue-200 p-6">
                 <h3 className="text-lg font-semibold mb-4 text-center">Следующие шаги</h3>
                 
                 <div className="grid md:grid-cols-2 gap-4">
@@ -308,7 +308,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
           {activeTab === 'details' && (
             <div className="space-y-6">
               {/* Детальная информация */}
-              <div className="bg-white p-6 rounded-lg border shadow-sm">
+              <div className="liquid-glass p-6">
                 <h3 className="text-lg font-semibold mb-4">Техническая информация</h3>
                 
                 <div className="grid lg:grid-cols-2 gap-6">
@@ -360,7 +360,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
 
               {/* Ценовая информация */}
               {priceInfo && (
-                <div className="bg-white p-6 rounded-lg border shadow-sm">
+                <div className="liquid-glass p-6">
                   <h3 className="text-lg font-semibold mb-4">Ценовая стратегия</h3>
                   
                   <div className="grid md:grid-cols-3 gap-4">
@@ -391,7 +391,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
           {activeTab === 'seo' && (
             <div className="space-y-6">
               {/* SEO информация (заглушка) */}
-              <div className="bg-white p-6 rounded-lg border shadow-sm">
+              <div className="liquid-glass p-6">
                 <h3 className="text-lg font-semibold mb-4">SEO оптимизация</h3>
                 
                 <div className="space-y-4">
@@ -428,7 +428,7 @@ export default function ProductResultModal({ productData, onClose, onEdit, onCre
               </div>
 
               {/* Рекомендации по улучшению */}
-              <div className="bg-white p-6 rounded-lg border shadow-sm">
+              <div className="liquid-glass p-6">
                 <h3 className="text-lg font-semibold mb-4">Рекомендации по продвижению</h3>
                 
                 <div className="space-y-3">
@@ -507,8 +507,8 @@ async function handlePublishProduct(productId: string) {
 // Заглушка для модального окна инфографики (пока)
 function InfographicCreationModal({ productData, onClose, onSuccess }: any) {
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="liquid-glass p-6 max-w-md w-full mx-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">Создание инфографики</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">

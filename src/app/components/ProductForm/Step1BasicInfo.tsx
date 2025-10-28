@@ -11,11 +11,13 @@ import {
   AlertCircle,
   Star,
   BarChart,
-  Settings
+  Settings,
+  Upload,
+  Image
 } from 'lucide-react';
 
-// Импортируем компонент селектора категорий
-import CategorySelector from './CategorySelector';
+// AI будет определять категорию автоматически по фото
+// import CategorySelector from './CategorySelector'; // Убрано - заменено на AI агента
 
 // Типы данных
 interface Cabinet {
@@ -70,26 +72,36 @@ interface Step1BasicInfoProps {
   formData: ProductFormData;
   selectedCategory: WBSubcategory | null;
   cabinets: Cabinet[];
+  selectedImage: File | null;
+  imagePreview: string;
   onInputChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void;
   onCategorySelect: (category: WBSubcategory | null) => void;
   onVariantSizeChange: (size: string, checked: boolean) => void;
+  onImageChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   getSizeOptionsForCategory: () => string[];
   discountPercent?: number;
   generateVendorCode: () => string;
   isLoadingCabinets: boolean;
+  isCategoryDetecting?: boolean;
+  categoryDetectionError?: string;
 }
 
 export default function Step1BasicInfo({
   formData,
   selectedCategory,
   cabinets,
+  selectedImage,
+  imagePreview,
   onInputChange,
   onCategorySelect,
   onVariantSizeChange,
+  onImageChange,
   getSizeOptionsForCategory,
   discountPercent,
   generateVendorCode,
-  isLoadingCabinets
+  isLoadingCabinets,
+  isCategoryDetecting = false,
+  categoryDetectionError = ''
 }: Step1BasicInfoProps) {
   
   return (
@@ -119,17 +131,105 @@ export default function Step1BasicInfo({
         </p>
       </div>
 
-      {/* Селектор категории */}
+      {/* Загрузка основного изображения */}
+      <div className="space-y-3">
+        <label className="block text-lg font-semibold text-white flex items-center gap-2">
+          <Upload className="w-5 h-5 text-blue-400" />
+          Основное изображение товара *
+        </label>
+        
+        <div className="border-2 border-dashed border-gray-600 rounded-xl p-6 text-center hover:border-blue-400 transition-colors cursor-pointer">
+          <input
+            type="file"
+            onChange={onImageChange}
+            accept="image/jpeg,image/jpg,image/png,image/webp"
+            className="hidden"
+            id="main-image-step1"
+          />
+          <label htmlFor="main-image-step1" className="cursor-pointer">
+            {imagePreview ? (
+              <div className="space-y-3">
+                <img 
+                  src={imagePreview} 
+                  alt="Превью товара" 
+                  className="max-w-xs mx-auto rounded-lg shadow-lg"
+                />
+                <div className="flex items-center justify-center gap-2">
+                  <Image className="w-4 h-4 text-green-400" />
+                  <p className="text-green-400 font-medium">Изображение загружено</p>
+                </div>
+                <p className="text-gray-400 text-sm">Нажмите для замены</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Upload className="w-8 h-8 mx-auto text-gray-400" />
+                <div>
+                  <p className="text-gray-300 font-medium">Загрузите фото товара</p>
+                  <p className="text-gray-500 text-sm">JPEG, PNG, WebP до 5MB</p>
+                </div>
+                <div className="px-4 py-2 bg-blue-600/20 border border-blue-500/50 rounded-lg inline-block">
+                  <p className="text-blue-400 text-sm">🤖 AI определит категорию по фото</p>
+                </div>
+              </div>
+            )}
+          </label>
+        </div>
+        
+        <p className="text-gray-400 text-xs px-2">
+          Загрузите качественное фото товара - ИИ автоматически определит категорию
+        </p>
+      </div>
+
+      {/* AI определение категории */}
       <div className="space-y-3">
         <label className="block text-lg font-semibold text-white flex items-center gap-2">
           <Tag className="w-5 h-5 text-blue-400" />
-          Категория товара *
+          Категория товара
         </label>
-        <CategorySelector
-          onCategorySelect={onCategorySelect}
-          selectedCategoryId={selectedCategory?.id}
-          productName={formData.name}
-        />
+        <div className="glass-container p-4 border border-blue-500/30">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 flex items-center justify-center">
+              <span className="text-white font-bold text-sm">AI</span>
+            </div>
+            <div className="flex-1">
+              {isCategoryDetecting ? (
+                <div>
+                  <p className="text-yellow-400 font-medium">🔍 AI анализирует изображение...</p>
+                  <p className="text-yellow-300 text-sm">Определяем наиболее подходящую категорию</p>
+                  <div className="mt-2">
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <div className="bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full animate-pulse" style={{width: '60%'}}></div>
+                    </div>
+                  </div>
+                </div>
+              ) : categoryDetectionError ? (
+                <div>
+                  <p className="text-red-400 font-medium">❌ Ошибка определения категории</p>
+                  <p className="text-red-300 text-sm">{categoryDetectionError}</p>
+                  {categoryDetectionError.includes('недоступен') ? (
+                    <p className="text-yellow-400 text-xs mt-1">Можете продолжить без автоопределения категории</p>
+                  ) : (
+                    <p className="text-gray-400 text-xs mt-1">Попробуйте загрузить другое изображение</p>
+                  )}
+                </div>
+              ) : selectedCategory ? (
+                <div>
+                  <p className="text-white font-medium">{selectedCategory.displayName}</p>
+                  <p className="text-green-400 text-sm">✓ Категория определена автоматически по фото</p>
+                  <p className="text-gray-400 text-xs">ID: {selectedCategory.id} • Комиссия: {selectedCategory.commissions?.fbw || 'N/A'}%</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-gray-300 font-medium">Категория будет определена автоматически</p>
+                  <p className="text-blue-400 text-sm">🤖 AI определит категорию по фото на следующем шаге</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <p className="text-gray-400 text-xs px-2">
+          ИИ-агент автоматически определит наиболее подходящую категорию на основе анализа изображений товара
+        </p>
       </div>
 
       {/* Цены */}

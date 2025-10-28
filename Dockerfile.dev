@@ -1,0 +1,26 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Устанавливаем переменные окружения
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Копируем package files
+COPY package*.json ./
+COPY tsconfig.json ./
+COPY next.config.js ./
+COPY postcss.config.js ./
+COPY tailwind.config.js ./
+
+# Устанавливаем все зависимости (включая dev)
+RUN npm ci
+
+# Генерируем Prisma Client
+RUN npx prisma generate
+
+# Expose порты
+EXPOSE 3000 3001
+
+# Запуск в режиме разработки
+CMD ["npm", "run", "dev"]

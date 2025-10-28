@@ -1,0 +1,37 @@
+[build]
+  command = "npx prisma generate && npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[build.environment]
+  NODE_VERSION = "18"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Redirect all server requests to Next.js
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/___netlify-handler"
+  status = 200
+  force = false
+
+# API routes
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/___netlify-handler"
+  status = 200
+
+# Environment variables that should be set in Netlify UI:
+# - DATABASE_URL (PostgreSQL connection string)
+# - REDIS_URL (Redis connection string)
+# - NEXT_PUBLIC_SUPABASE_URL
+# - NEXT_PUBLIC_SUPABASE_ANON_KEY
+# - SUPABASE_SERVICE_ROLE_KEY
+# - GOOGLE_VERTEX_AI_PROJECT
+# - GOOGLE_VERTEX_AI_LOCATION
+# - WB_API_KEY
+# - TELEGRAM_BOT_TOKEN
+# - NEXT_PUBLIC_API_URL (your Netlify site URL)
+# - NEXT_PUBLIC_SITE_URL (your Netlify site URL)
+# - OPENAI_API_KEY (optional)

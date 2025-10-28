@@ -71,6 +71,12 @@ interface Step4ResultsProps {
   hasPendingData?: boolean;
   isPublished?: boolean;
   isPublishing?: boolean;
+  dimensions?: {
+    length?: string;
+    width?: string;
+    height?: string;
+    weight?: string;
+  };
 }
 
 // Компонент для отображения характеристики
@@ -91,21 +97,21 @@ const CharacteristicItem = ({
 
   const getCategoryIcon = () => {
     if (characteristic.category === 'user_protected') {
-      return <Lock className="w-4 h-4 text-blue-400" />;
+      return <Lock className="w-4 h-4 text-blue-600" />;
     } else if (characteristic.isFilled) {
-      return <CheckCircle className="w-4 h-4 text-green-400" />;
+      return <CheckCircle className="w-4 h-4 text-green-600" />;
     } else {
-      return <AlertCircle className="w-4 h-4 text-gray-400" />;
+      return <AlertCircle className="w-4 h-4 text-gray-500" />;
     }
   };
 
   const getCategoryColor = () => {
     if (characteristic.category === 'user_protected') {
-      return 'border-blue-500/30 bg-blue-900/10';
+      return 'border-blue-400 bg-blue-50';
     } else if (characteristic.isFilled) {
-      return 'border-green-500/30 bg-green-900/10';
+      return 'border-green-400 bg-green-50';
     } else {
-      return 'border-gray-500/20 bg-gray-900/10';
+      return 'border-gray-300 bg-gray-50';
     }
   };
 
@@ -120,25 +126,25 @@ const CharacteristicItem = ({
   };
 
   return (
-    <div className={`p-4 rounded-lg border ${getCategoryColor()} bg-black/30 hover:border-blue-500/30 transition-colors`}>
+    <div className={`p-4 rounded-xl border-2 ${getCategoryColor()} hover:border-purple-400 transition-all shadow-sm`}>
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             {getCategoryIcon()}
-            <span className="font-medium text-white text-sm">{characteristic.name}</span>
+            <span className="font-semibold text-gray-900 text-sm">{characteristic.name}</span>
             
-            <span className={`px-2 py-0.5 rounded text-xs ${
+            <span className={`px-2 py-0.5 rounded-md text-xs font-semibold ${
               characteristic.category === 'user_protected'
-                ? 'bg-blue-900/30 text-blue-300'
+                ? 'bg-blue-200 text-blue-800'
                 : characteristic.isFilled 
-                ? 'bg-green-900/30 text-green-300' 
-                : 'bg-gray-900/30 text-gray-300'
+                ? 'bg-green-200 text-green-800' 
+                : 'bg-gray-200 text-gray-700'
             }`}>
               {getCategoryLabel()}
             </span>
             
             {characteristic.isRequired && (
-              <span className="px-1.5 py-0.5 bg-red-900/30 text-red-300 text-xs rounded">
+              <span className="px-1.5 py-0.5 bg-red-200 text-red-800 text-xs rounded-md font-semibold">
                 Обязательная
               </span>
             )}
@@ -149,8 +155,18 @@ const CharacteristicItem = ({
               {characteristic.possibleValues && characteristic.possibleValues.length > 0 ? (
                 <select
                   value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
-                  className="w-full px-3 py-2 bg-black/40 border border-blue-500/30 rounded text-white text-sm focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                  onChange={(e) => {
+                    const newValue = e.target.value;
+                    setEditValue(newValue);
+                    setTimeout(() => {
+                      if (newValue !== String(characteristic.value || '')) {
+                        onSave(newValue);
+                      }
+                      onCancel();
+                    }, 500); // Добавляем задержку перед автосохранением и закрытием режима редактирования
+                  }}
+                  autoFocus
+                  className="w-full px-3 py-2 bg-white border-2 border-gray-300 rounded-lg text-gray-900 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-200 font-medium"
                 >
                   <option value="">Выберите значение</option>
                   {characteristic.possibleValues.map((option) => (
@@ -164,66 +180,87 @@ const CharacteristicItem = ({
                   type="number"
                   value={editValue}
                   onChange={(e) => setEditValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      onSave(editValue);
+                      setTimeout(() => onCancel(), 500); // Добавляем задержку перед закрытием режима редактирования
+                    } else if (e.key === 'Escape') {
+                      onCancel();
+                    }
+                  }}
+                  onBlur={() => {
+                    if (editValue !== String(characteristic.value || '')) {
+                      onSave(editValue);
+                    }
+                    setTimeout(() => onCancel(), 500); // Добавляем задержку перед закрытием режима редактирования
+                  }}
                   min={characteristic.minValue}
                   max={characteristic.maxValue}
                   placeholder="Введите число"
-                  className="w-full px-3 py-2 bg-black/40 border border-blue-500/30 rounded text-white text-sm focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                  autoFocus
+                  className="w-full px-3 py-2 bg-white border-2 border-gray-300 rounded-lg text-gray-900 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-200 font-medium"
                 />
               ) : (
                 <input
                   type="text"
                   value={editValue}
                   onChange={(e) => setEditValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      onSave(editValue);
+                      setTimeout(() => onCancel(), 500); // Добавляем задержку перед закрытием режима редактирования
+                    } else if (e.key === 'Escape') {
+                      onCancel();
+                    }
+                  }}
+                  onBlur={() => {
+                    if (editValue !== String(characteristic.value || '')) {
+                      onSave(editValue);
+                    }
+                    setTimeout(() => onCancel(), 500); // Добавляем задержку перед закрытием режима редактирования
+                  }}
                   maxLength={characteristic.maxLength}
                   placeholder="Введите значение"
-                  className="w-full px-3 py-2 bg-black/40 border border-blue-500/30 rounded text-white text-sm focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                  autoFocus
+                  className="w-full px-3 py-2 bg-white border-2 border-gray-300 rounded-lg text-gray-900 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-200 font-medium"
                 />
               )}
               
               {characteristic.description && (
-                <p className="text-xs text-gray-400">{characteristic.description}</p>
+                <p className="text-xs text-gray-600 font-medium">{characteristic.description}</p>
               )}
               
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onSave(editValue)}
-                  className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs flex items-center gap-1 transition-colors"
-                >
-                  <Save className="w-3 h-3" />
-                  Сохранить
-                </button>
-                <button
-                  onClick={onCancel}
-                  className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded text-xs flex items-center gap-1 transition-colors"
-                >
-                  <X className="w-3 h-3" />
-                  Отмена
-                </button>
-              </div>
+              <p className="text-xs text-blue-700 mt-1 font-medium">
+                💡 Нажмите Enter или уберите фокус для сохранения
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="text-white text-sm min-h-[20px]">
-                {characteristic.value ? (
-                  <span className={`font-medium ${
-                    characteristic.category === 'user_protected' ? 'text-blue-200' : 'text-white'
+              <div 
+                className="text-gray-900 text-sm min-h-[20px] cursor-pointer hover:bg-purple-50 p-2 rounded-lg transition-colors border border-transparent hover:border-purple-300"
+                onClick={onEdit}
+                title="Нажмите для редактирования"
+              >
+                {characteristic.value !== null && characteristic.value !== undefined && characteristic.value !== '' ? (
+                  <span className={`font-semibold ${
+                    characteristic.category === 'user_protected' ? 'text-blue-700' : 'text-gray-900'
                   }`}>
                     {characteristic.value}
                   </span>
                 ) : (
-                  <span className="text-gray-400 italic">
-                    Можно заполнить для улучшения карточки товара
+                  <span className="text-gray-500 italic font-medium">
+                    Нажмите для заполнения
                   </span>
                 )}
               </div>
               
               {characteristic.isFilled && characteristic.confidence > 0 && (
                 <div className="flex items-center gap-2">
-                  <div className="text-xs text-gray-400">
+                  <div className="text-xs text-gray-700 font-semibold">
                     Уверенность ИИ: {Math.round(characteristic.confidence * 100)}%
                   </div>
                   {characteristic.confidence < 0.7 && (
-                    <div className="text-xs text-yellow-400 flex items-center gap-1">
+                    <div className="text-xs text-yellow-700 flex items-center gap-1 font-semibold">
                       <Lightbulb className="w-3 h-3" />
                       Рекомендуется проверить
                     </div>
@@ -232,7 +269,7 @@ const CharacteristicItem = ({
               )}
               
               {characteristic.reasoning && characteristic.reasoning !== 'ai_analysis' && (
-                <div className="text-xs text-gray-400 bg-gray-800/30 rounded p-2">
+                <div className="text-xs text-gray-700 bg-gray-100 rounded-lg p-2 font-medium">
                   {characteristic.reasoning}
                 </div>
               )}
@@ -240,15 +277,7 @@ const CharacteristicItem = ({
           )}
         </div>
 
-        {characteristic.isEditable !== false && !isEditing && (
-          <button
-            onClick={onEdit}
-            className="p-2 text-gray-400 hover:text-blue-400 hover:bg-blue-900/20 rounded transition-colors"
-            title="Редактировать характеристику"
-          >
-            <Edit3 className="w-4 h-4" />
-          </button>
-        )}
+        {/* Кнопка редактирования убрана - редактирование по клику на значение */}
       </div>
     </div>
   );
@@ -268,12 +297,14 @@ export default function Step4Results({
   onCharacteristicUpdate,
   hasPendingData = false,
   isPublished = false,
-  isPublishing = false
+  isPublishing = false,
+  dimensions
 }: Step4ResultsProps) {
   const [characteristics, setCharacteristics] = useState<AICharacteristic[]>([]);
   const [editingCharacteristic, setEditingCharacteristic] = useState<number | null>(null);
   const [showOnlyFilled, setShowOnlyFilled] = useState(false);
   const [showSystemInfo, setShowSystemInfo] = useState(false);
+  const [retryButtonClicked, setRetryButtonClicked] = useState(false);
 
   // Обновляем характеристики когда приходят новые данные
   useEffect(() => {
@@ -364,99 +395,285 @@ export default function Step4Results({
     <div className="space-y-6">
       {/* Заголовок и статус */}
       <div className="text-center">
-        <h2 className="text-2xl font-bold text-white mb-2">Результаты создания товара</h2>
+        <h2 className="text-3xl font-bold text-gray-900 mb-2">Результаты создания товара</h2>
         {hasPendingData && !isPublished ? (
-          <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3 mb-4">
-            <p className="text-yellow-300 text-sm flex items-center justify-center gap-2">
-              <AlertCircle className="w-4 h-4" />
+          <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl p-4 mb-4 shadow-md">
+            <p className="text-yellow-800 text-sm flex items-center justify-center gap-2 font-semibold">
+              <AlertCircle className="w-5 h-5" />
               Проверьте характеристики и нажмите "Опубликовать товар" для сохранения в БД и публикации на Wildberries
             </p>
           </div>
         ) : isPublished ? (
-          <div className="bg-green-900/20 border border-green-500/30 rounded-lg p-3 mb-4">
-            <p className="text-green-300 text-sm flex items-center justify-center gap-2">
-              <CheckCircle className="w-4 h-4" />
+          <div className="bg-green-50 border-2 border-green-400 rounded-xl p-4 mb-4 shadow-md">
+            <p className="text-green-800 text-sm flex items-center justify-center gap-2 font-semibold">
+              <CheckCircle className="w-5 h-5" />
               Товар опубликован на Wildberries и сохранен в базе данных
             </p>
           </div>
         ) : (
-          <p className="text-gray-300">Проверьте и настройте все характеристики перед публикацией</p>
+          <p className="text-gray-600 font-medium">Проверьте и настройте все характеристики перед публикацией</p>
         )}
       </div>
 
       {/* Основная информация товара */}
-      <div className="bg-black/40 backdrop-blur-md rounded-xl border border-blue-500/20 p-6">
-        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <CheckCircle className="w-5 h-5 text-green-400" />
+      <div className="liquid-glass rounded-2xl border-2 border-gray-300 p-6 shadow-xl">
+        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+          <CheckCircle className="w-6 h-6 text-green-600" />
           Информация о товаре
         </h3>
         
         <div className="grid md:grid-cols-2 gap-4">
           <div>
-            <label className="text-sm font-medium text-gray-300 block mb-2">Название товара</label>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Название товара</label>
             <input
               type="text"
               value={aiResponse?.generatedName || ''}
               onChange={(e) => onUpdateProductField('name', e.target.value)}
-              className="w-full px-4 py-3 border border-blue-500/30 rounded-lg bg-black/40 text-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
               placeholder="Название товара"
               disabled={isPublishing}
             />
           </div>
           
           <div>
-            <label className="text-sm font-medium text-gray-300 block mb-2">Качество заполнения</label>
-            <div className="flex items-center gap-4 px-4 py-3 border border-green-500/30 rounded-lg bg-green-900/10">
-              <div className="text-2xl font-bold text-green-400">{stats.fillRate}%</div>
-              <div className="text-sm text-green-300">
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Качество заполнения</label>
+            <div className="flex items-center gap-4 px-4 py-3 border-2 border-green-400 rounded-lg bg-green-50 shadow-sm">
+              <div className="text-3xl font-bold text-green-700">{stats.fillRate}%</div>
+              <div className="text-sm text-green-800 font-semibold">
                 {stats.editableFilled} из {stats.editable} редактируемых заполнено
               </div>
             </div>
           </div>
         </div>
         
+        {/* Цены и остатки */}
+        <div className="grid md:grid-cols-5 gap-4 mt-4">
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Цена без скидки (₽) *</label>
+            <input
+              type="number"
+              value={aiResponse?.price || ''}
+              onChange={(e) => onUpdateProductField('price', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              disabled={isPublishing}
+            />
+          </div>
+          
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Цена со скидкой (₽)</label>
+            <input
+              type="number"
+              value={aiResponse?.discountPrice || ''}
+              onChange={(e) => onUpdateProductField('discountPrice', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              disabled={isPublishing}
+            />
+          </div>
+          
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Себестоимость (₽)</label>
+            <input
+              type="number"
+              value={aiResponse?.costPrice || ''}
+              onChange={(e) => onUpdateProductField('costPrice', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              disabled={isPublishing}
+            />
+          </div>
+          
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Остатки (шт) *</label>
+            <input
+              type="number"
+              value={aiResponse?.stock || ''}
+              onChange={(e) => onUpdateProductField('stock', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              disabled={isPublishing}
+            />
+          </div>
+          
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Резерв (шт)</label>
+            <input
+              type="number"
+              value={aiResponse?.reserved || ''}
+              onChange={(e) => onUpdateProductField('reserved', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              disabled={isPublishing}
+            />
+          </div>
+        </div>
+        
+        {/* Габариты упаковки */}
+        <div className="grid md:grid-cols-4 gap-4 mt-4">
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Длина (см)</label>
+            <input
+              type="number"
+              value={dimensions?.length || ''}
+              onChange={(e) => onUpdateProductField('length', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              step="0.1"
+              disabled={isPublishing}
+            />
+          </div>
+          
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Ширина (см)</label>
+            <input
+              type="number"
+              value={dimensions?.width || ''}
+              onChange={(e) => onUpdateProductField('width', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              step="0.1"
+              disabled={isPublishing}
+            />
+          </div>
+          
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Высота (см)</label>
+            <input
+              type="number"
+              value={dimensions?.height || ''}
+              onChange={(e) => onUpdateProductField('height', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              step="0.1"
+              disabled={isPublishing}
+            />
+          </div>
+          
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Вес (кг)</label>
+            <input
+              type="number"
+              value={dimensions?.weight || ''}
+              onChange={(e) => onUpdateProductField('weight', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              step="0.1"
+              disabled={isPublishing}
+            />
+          </div>
+        </div>
+        
+        {/* Габариты товара */}
+        <div className="grid md:grid-cols-4 gap-4 mt-4">
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Длина (см)</label>
+            <input
+              type="number"
+              value={dimensions?.length || ''}
+              onChange={(e) => onUpdateProductField('length', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              step="0.1"
+              disabled={isPublishing}
+            />
+          </div>
+          
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Ширина (см)</label>
+            <input
+              type="number"
+              value={dimensions?.width || ''}
+              onChange={(e) => onUpdateProductField('width', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              step="0.1"
+              disabled={isPublishing}
+            />
+          </div>
+          
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Высота (см)</label>
+            <input
+              type="number"
+              value={dimensions?.height || ''}
+              onChange={(e) => onUpdateProductField('height', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              step="0.1"
+              disabled={isPublishing}
+            />
+          </div>
+          
+          <div>
+            <label className="text-sm font-semibold text-gray-700 block mb-2">Вес (кг)</label>
+            <input
+              type="number"
+              value={dimensions?.weight || ''}
+              onChange={(e) => onUpdateProductField('weight', e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              placeholder="0"
+              min="0"
+              step="0.01"
+              disabled={isPublishing}
+            />
+          </div>
+        </div>
+        
         <div className="mt-4">
-          <label className="text-sm font-medium text-gray-300 block mb-2">Описание товара</label>
+          <label className="text-sm font-semibold text-gray-700 block mb-2">Описание товара</label>
           <textarea
             value={aiResponse?.seoDescription || ''}
             onChange={(e) => onUpdateProductField('description', e.target.value)}
             rows={4}
-            className="w-full px-4 py-3 border border-blue-500/30 rounded-lg bg-black/40 text-white focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+            className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
             placeholder="Описание товара для покупателей..."
             disabled={isPublishing}
           />
-          <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
+          <div className="flex items-center justify-between mt-2 text-xs text-gray-600 font-medium">
             <span>Рекомендуемая длина: 1300-2000 символов</span>
-            <span>{(aiResponse?.seoDescription || '').length} символов</span>
+            <span className="font-semibold">{(aiResponse?.seoDescription || '').length} символов</span>
           </div>
         </div>
       </div>
 
       {/* Статистика и управление */}
-      <div className="bg-black/40 backdrop-blur-md rounded-xl border border-blue-500/20 p-6">
+      <div className="liquid-glass rounded-2xl border-2 border-gray-300 p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-2">
-              <Sparkles className="w-5 h-5 text-blue-400" />
+            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2 mb-2">
+              <Sparkles className="w-6 h-6 text-purple-600" />
               Характеристики товара ({stats.total})
             </h3>
             
             <div className="flex items-center gap-6 text-sm flex-wrap">
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded bg-green-500"></div>
-                <span className="text-green-300">Заполнено ИИ: {stats.editableFilled}</span>
+                <div className="w-3 h-3 rounded bg-green-600"></div>
+                <span className="text-green-800 font-semibold">Заполнено ИИ: {stats.editableFilled}</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded bg-blue-500"></div>
-                <span className="text-blue-300">Системных: {stats.system}</span>
+                <div className="w-3 h-3 rounded bg-blue-600"></div>
+                <span className="text-blue-800 font-semibold">Системных: {stats.system}</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded bg-red-500"></div>
-                <span className="text-red-300">Обязательных: {stats.requiredFilled}/{stats.required}</span>
+                <div className="w-3 h-3 rounded bg-red-600"></div>
+                <span className="text-red-800 font-semibold">Обязательных: {stats.requiredFilled}/{stats.required}</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded bg-gray-500"></div>
-                <span className="text-gray-300">Можно дополнить: {stats.editable - stats.editableFilled}</span>
+                <div className="w-3 h-3 rounded bg-gray-600"></div>
+                <span className="text-gray-800 font-semibold">Можно дополнить: {stats.editable - stats.editableFilled}</span>
               </div>
             </div>
           </div>
@@ -464,10 +681,10 @@ export default function Step4Results({
           <div className="flex gap-2">
             <button
               onClick={() => setShowOnlyFilled(!showOnlyFilled)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all shadow-md ${
                 showOnlyFilled 
-                  ? 'bg-green-600 text-white shadow-md' 
-                  : 'bg-gray-600 hover:bg-gray-700 text-gray-300'
+                  ? 'bg-green-600 hover:bg-green-700 text-white' 
+                  : 'bg-gray-300 hover:bg-gray-400 text-gray-800'
               }`}
             >
               {showOnlyFilled ? 'Показать все' : 'Только заполненные'}
@@ -475,7 +692,7 @@ export default function Step4Results({
             
             <button
               onClick={() => setShowSystemInfo(!showSystemInfo)}
-              className="p-2 bg-gray-600 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors"
+              className="p-2 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded-lg transition-all shadow-md"
               title="Системная информация"
             >
               <Settings className="w-4 h-4" />
@@ -485,27 +702,27 @@ export default function Step4Results({
 
         {/* Системная информация */}
         {showSystemInfo && (
-          <div className="mb-4 p-4 bg-gray-800/30 rounded-lg border border-gray-600/30">
-            <h4 className="text-white font-medium mb-2 flex items-center gap-2">
-              <Database className="w-4 h-4" />
+          <div className="mb-4 p-4 bg-gray-100 rounded-xl border-2 border-gray-300 shadow-sm">
+            <h4 className="text-gray-900 font-bold mb-2 flex items-center gap-2">
+              <Database className="w-5 h-5 text-purple-600" />
               Системная информация
             </h4>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
-                <span className="text-gray-400 block">Товар ID:</span>
-                <span className="text-white font-mono">{createdProductId?.slice(-8) || 'N/A'}</span>
+                <span className="text-gray-600 block font-semibold">Товар ID:</span>
+                <span className="text-gray-900 font-mono font-bold">{createdProductId?.slice(-8) || 'N/A'}</span>
               </div>
               <div>
-                <span className="text-gray-400 block">ИИ Система:</span>
-                <span className="text-white">Unified AI v3</span>
+                <span className="text-gray-600 block font-semibold">ИИ Система:</span>
+                <span className="text-gray-900 font-bold">Unified AI v3</span>
               </div>
               <div>
-                <span className="text-gray-400 block">Модель:</span>
-                <span className="text-white">GPT-5-mini</span>
+                <span className="text-gray-600 block font-semibold">Модель:</span>
+                <span className="text-gray-900 font-bold">GPT-5-mini</span>
               </div>
               <div>
-                <span className="text-gray-400 block">Статус:</span>
-                <span className={`${hasPendingData ? 'text-yellow-400' : isPublished ? 'text-green-400' : 'text-gray-400'}`}>
+                <span className="text-gray-600 block font-semibold">Статус:</span>
+                <span className={`font-bold ${hasPendingData ? 'text-yellow-700' : isPublished ? 'text-green-700' : 'text-gray-700'}`}>
                   {hasPendingData ? 'Предпросмотр' : isPublished ? 'Опубликован' : 'Создан'}
                 </span>
               </div>
@@ -528,8 +745,8 @@ export default function Step4Results({
           </div>
         ) : (
           <div className="text-center py-8">
-            <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-400 mb-4">
+            <AlertCircle className="w-12 h-12 text-gray-500 mx-auto mb-4" />
+            <p className="text-gray-700 mb-4 font-semibold">
               {showOnlyFilled && stats.filled === 0 
                 ? 'Нет заполненных характеристик - ИИ не смог определить значения автоматически' 
                 : 'Характеристики не загружены'
@@ -557,36 +774,36 @@ export default function Step4Results({
 
       {/* Рекомендации */}
       {characteristics.length > 0 && !isPublished && (
-        <div className="bg-blue-900/20 border border-blue-500/30 rounded-xl p-4">
-          <h4 className="text-white font-medium mb-3 flex items-center gap-2">
-            <Lightbulb className="w-4 h-4 text-blue-400" />
+        <div className="bg-blue-50 border-2 border-blue-400 rounded-xl p-4 shadow-md">
+          <h4 className="text-gray-900 font-bold mb-3 flex items-center gap-2">
+            <Lightbulb className="w-5 h-5 text-blue-600" />
             Рекомендации по улучшению карточки товара:
           </h4>
-          <ul className="text-sm text-blue-200 space-y-2">
+          <ul className="text-sm text-gray-800 space-y-2 font-medium">
             {stats.fillRate < 50 && (
               <li className="flex items-start gap-2">
-                <span className="text-yellow-400 mt-0.5">•</span>
+                <span className="text-yellow-700 mt-0.5 font-bold">•</span>
                 <span>Заполните больше характеристик для улучшения ранжирования на Wildberries (рекомендуется 60%+)</span>
               </li>
             )}
             {stats.requiredFilled < stats.required && (
               <li className="flex items-start gap-2">
-                <span className="text-red-400 mt-0.5">•</span>
+                <span className="text-red-700 mt-0.5 font-bold">•</span>
                 <span>Обязательно заполните все обязательные характеристики ({stats.requiredFilled}/{stats.required})</span>
               </li>
             )}
             {stats.fillRate >= 80 && (
               <li className="flex items-start gap-2">
-                <span className="text-green-400 mt-0.5">•</span>
+                <span className="text-green-700 mt-0.5 font-bold">•</span>
                 <span>Отличное заполнение характеристик! Товар готов к публикации</span>
               </li>
             )}
             <li className="flex items-start gap-2">
-              <span className="text-blue-400 mt-0.5">•</span>
+              <span className="text-blue-700 mt-0.5 font-bold">•</span>
               <span>Проверьте точность характеристик, заполненных ИИ, особенно с низкой уверенностью</span>
             </li>
             <li className="flex items-start gap-2">
-              <span className="text-blue-400 mt-0.5">•</span>
+              <span className="text-blue-700 mt-0.5 font-bold">•</span>
               <span>Все характеристики опциональны - заполняйте те, которые помогут покупателям</span>
             </li>
           </ul>
@@ -598,12 +815,17 @@ export default function Step4Results({
         {/* Основные кнопки публикации и сохранения */}
         {!isPublished && hasPendingData && (
           <div className="text-center space-y-4">
-            {/* Основная кнопка публикации */}
+            {/* DEBUG: Показываем количество характеристик */}
+            <p className="text-gray-600 text-xs font-medium">
+              📊 Характеристик загружено: {characteristics.length}
+            </p>
+            
+            {/* Основная кнопка публикации - ВСЕГДА АКТИВНА */}
             <button
               onClick={onPublish}
-              disabled={isPublishing || characteristics.length === 0}
+              disabled={isPublishing}
               className={`px-8 py-4 rounded-xl flex items-center gap-3 font-semibold text-lg mx-auto transition-all duration-300 ${
-                isPublishing || characteristics.length === 0
+                isPublishing
                   ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
                   : 'bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white shadow-xl hover:shadow-2xl transform hover:scale-105'
               }`}
@@ -621,21 +843,21 @@ export default function Step4Results({
               )}
             </button>
             
-            <p className="text-gray-400 text-sm">
+            <p className="text-gray-700 text-sm font-medium">
               Товар будет автоматически сохранен в базе данных и опубликован на Wildberries
             </p>
             
             {/* Кнопка сохранения без публикации */}
-            <div className="border-t border-gray-600 pt-4">
+            <div className="border-t-2 border-gray-300 pt-4">
               <button
                 onClick={onSaveOnly}
-                disabled={isPublishing || characteristics.length === 0}
-                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2 mx-auto"
+                disabled={isPublishing}
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg font-semibold shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2 mx-auto"
               >
                 <Database className="w-5 h-5" />
                 Сохранить без публикации на WB
               </button>
-              <p className="text-gray-400 text-xs mt-2">
+              <p className="text-gray-600 text-xs mt-2 font-medium">
                 Сохранить данные в базу без публикации на Wildberries
               </p>
             </div>
@@ -644,16 +866,16 @@ export default function Step4Results({
 
         {/* Дополнительные действия */}
         <div className="flex flex-wrap gap-4 justify-center">
-          {isPublished && (
+          {isPublished && !retryButtonClicked && (
             <button
               onClick={() => {
-                console.log('Переход к товару на WB');
-                // TODO: Добавить реальный переход к товару на WB
+                setRetryButtonClicked(true);
+                onPublish();
               }}
               className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2 font-medium shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
             >
-              <ExternalLink className="w-5 h-5" />
-              Посмотреть на Wildberries
+              <Upload className="w-5 h-5" />
+              Опубликовать повторно
             </button>
           )}
           
@@ -678,12 +900,12 @@ export default function Step4Results({
 
       {/* Статус предпросмотра */}
       {hasPendingData && !isPublished && (
-        <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-4">
+        <div className="bg-yellow-50 border-2 border-yellow-400 rounded-xl p-4 shadow-md">
           <div className="flex items-center gap-2 mb-2">
-            <Eye className="w-5 h-5 text-yellow-400" />
-            <span className="text-yellow-300 font-medium">Режим предварительного просмотра</span>
+            <Eye className="w-5 h-5 text-yellow-700" />
+            <span className="text-yellow-900 font-bold">Режим предварительного просмотра</span>
           </div>
-          <p className="text-yellow-200 text-sm">
+          <p className="text-yellow-800 text-sm font-medium">
             Данные отображаются для проверки и редактирования. После нажатия кнопки "Опубликовать товар" 
             все изменения будут сохранены в базе данных и товар будет опубликован на Wildberries.
           </p>
@@ -692,12 +914,12 @@ export default function Step4Results({
 
       {/* Информация об успешной публикации */}
       {isPublished && (
-        <div className="bg-green-900/20 border border-green-500/30 rounded-lg p-4">
+        <div className="bg-green-50 border-2 border-green-400 rounded-xl p-4 shadow-md">
           <div className="flex items-center gap-2 mb-2">
-            <CheckCircle className="w-5 h-5 text-green-400" />
-            <span className="text-green-300 font-medium">Товар успешно опубликован</span>
+            <CheckCircle className="w-5 h-5 text-green-700" />
+            <span className="text-green-900 font-bold">Товар успешно опубликован</span>
           </div>
-          <p className="text-green-200 text-sm">
+          <p className="text-green-800 text-sm font-medium">
             Ваш товар сохранен в базе данных и опубликован на Wildberries. 
             Теперь вы можете просмотреть его в личном кабинете или создать новый товар.
           </p>

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '../../../../lib/prisma'
+import { prisma } from '../../../../../lib/prisma'
 
 export async function GET() {
   try {
@@ -22,7 +22,7 @@ export async function GET() {
       ok: true,
       ping,
       counts: { parents, subs },
-      sample: sample.map((c) => ({
+      sample: sample.map((c: any) => ({
         id: c.id,
         name: c.name,
         parent: c.parentCategory?.name,

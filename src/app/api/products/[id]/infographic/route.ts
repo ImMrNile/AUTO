@@ -115,7 +115,9 @@ export async function POST(
     // Парсим данные ИИ
     let aiData: any = {};
     try {
-      aiData = product.aiCharacteristics ? JSON.parse(product.aiCharacteristics) : {};
+      if (product.aiCharacteristics && typeof product.aiCharacteristics === 'string') {
+        aiData = JSON.parse(product.aiCharacteristics);
+      }
     } catch (e) {
       console.error('❌ Ошибка парсинга aiCharacteristics:', e);
       aiData = {};
@@ -182,7 +184,7 @@ export async function POST(
     }
 
     // Сохраняем результаты
-    const wbData = product.wbData ? JSON.parse(product.wbData) : {};
+    const wbData = product.wbData && typeof product.wbData === 'string' ? JSON.parse(product.wbData) : {};
     const updatedWbData = {
       ...wbData,
       infographics: {
@@ -263,7 +265,9 @@ export async function GET(
 
     let wbData: any = {};
     try {
-      wbData = product.wbData ? JSON.parse(product.wbData) : {};
+      if (product.wbData && typeof product.wbData === 'string') {
+        wbData = JSON.parse(product.wbData);
+      }
     } catch (e) {
       wbData = {};
     }
