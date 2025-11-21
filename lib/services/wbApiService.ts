@@ -2516,6 +2516,89 @@ private logWeightConversion(originalInput: any, finalWeight: number): void {
       return { orders: [] };
     }
   }
+
+  /**
+   * БАТЧ-ЗАПРОС: Получение цен для нескольких товаров одним запросом
+   * Использует WB Prices API: POST /api/v2/list/goods/filter
+   * @param apiToken - API токен WB
+   * @param nmIds - Массив nmId товаров
+   * @returns Map с ценами по nmId
+   */
+  async getBatchPrices(apiToken: string, nmIds: number[]): Promise<Map<number, number>> {
+    try {
+      console.log(`💰 [WB Batch Prices] Получение цен для ${nmIds.length} товаров...`);
+      
+      const response = await this.makeRequest(
+        '/api/v2/list/goods/filter',
+        apiToken,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            limit: 1000,
+            offset: 0,
+            filterNmID: nmIds
+          })
+        },
+        0,
+        WB_API_CONFIG.BASE_URLS.PRICES
+      );
+
+      const pricesMap = new Map<number, number>();
+      const pricesList = response?.data?.listGoods || [];
+      
+      pricesList.forEach((item: any) => {
+        if (item.nmID && item.sizes?.[0]?.price) {
+          pricesMap.set(item.nmID, item.sizes[0].price / 100); // Цена в рублях
+        }
+      });
+      
+      console.log(`✅ [WB Batch Prices] Получено цен: ${pricesMap.size}/${nmIds.length}`);
+      return pricesMap;
+    } catch (error) {
+      console.error(`❌ [WB Batch Prices] Ошибка получения цен:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * БАТЧ-ЗАПРОС: Получение остатков для всех товаров одним запросом
+   * Использует WB Statistics API: GET /api/v1/supplier/stocks
+   * @param apiToken - API токен WB
+   * @returns Map с остатками по nmId
+   */
+  async getBatchStocks(apiToken: string): Promise<Map<number, number>> {
+    try {
+      console.log(`📦 [WB Batch Stocks] Получение остатков...`);
+      
+      const dateFrom = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const response = await this.makeRequest(
+        `/api/v1/supplier/stocks?dateFrom=${dateFrom}`,
+        apiToken,
+        { method: 'GET' },
+        0,
+        WB_API_CONFIG.BASE_URLS.STATISTICS
+      );
+
+      const stocksMap = new Map<number, number>();
+      const allStocks = Array.isArray(response) ? response : [];
+      
+      allStocks.forEach((stock: any) => {
+        const nmId = stock.nmId || stock.nmID;
+        if (nmId) {
+          const existing = stocksMap.get(nmId) || 0;
+          const quantity = stock.quantity || stock.quantityFull || 0;
+          stocksMap.set(nmId, existing + quantity);
+        }
+      });
+      
+      console.log(`✅ [WB Batch Stocks] Получено остатков для ${stocksMap.size} товаров`);
+      return stocksMap;
+    } catch (error) {
+      console.error(`❌ [WB Batch Stocks] Ошибка получения остатков:`, error);
+      throw error;
+    }
+  }
 }
 
 export const wbApiService = new WbApiService();

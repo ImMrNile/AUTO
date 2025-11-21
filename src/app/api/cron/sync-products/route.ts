@@ -107,94 +107,73 @@ export async function GET(request: NextRequest) {
         let failed = 0;
         let rateLimitErrors = 0;
 
-        // Синхронизируем каждый товар
-        for (const product of products) {
+        try {
+          // 1. БАТЧ-ЗАПРОС: Получаем ВСЕ цены одним запросом
+          const nmIds = products.map(p => parseInt(p.wbNmId!));
+          const pricesMap = await wbApiService.getBatchPrices(cabinet.apiToken!, nmIds);
+
+          // 2. БАТЧ-ЗАПРОС: Получаем ВСЕ остатки одним запросом
+          let stocksMap = new Map<number, number>();
           try {
-            const nmId = parseInt(product.wbNmId!);
-
-            // Если уже много ошибок с лимитами - пропускаем оставшиеся товары
-            if (rateLimitErrors >= 3) {
-              console.log(`⚠️ [Sync Products Cron] Превышено количество ошибок с лимитами (${rateLimitErrors}), пропускаем оставшиеся товары`);
-              break;
-            }
-
-            // 1. Получаем текущую цену с WB
-            const priceInfo = await wbApiService.getProductPrice(cabinet.apiToken!, nmId);
-
-            // 2. Получаем текущие остатки с WB (если есть barcode)
-            let stockInfo = null;
-            if (product.barcode) {
-              stockInfo = await wbApiService.getProductStock(cabinet.apiToken!, nmId);
-            }
-
-            // Проверяем на ошибки с лимитами
-            const isRateLimitError = priceInfo.error?.includes('Превышен лимит') || stockInfo?.error?.includes('Превышен лимит');
-            if (isRateLimitError) {
+            stocksMap = await wbApiService.getBatchStocks(cabinet.apiToken!);
+          } catch (stockError: any) {
+            if (stockError.message?.includes('Превышен лимит')) {
               rateLimitErrors++;
-              console.log(`⚠️ [Sync Products Cron] Лимит WB API превышен для товара ${product.name}, пропускаем`);
-              continue;
+              console.log(`⚠️ [Sync Products Cron] Лимит WB API при получении остатков, пропускаем`);
+            } else {
+              console.error(`⚠️ [Sync Products Cron] Ошибка получения остатков:`, stockError);
             }
+          }
 
-            // Проверяем на ошибки "товар не найден"
-            const priceNotFound = priceInfo.error === 'Товар не найден в Wildberries';
-            const stockNotFound = stockInfo && stockInfo.error === 'Товар не найден в Wildberries';
+          // 3. Обновляем данные в БД для каждого товара
+          for (const product of products) {
+            try {
+              const nmId = parseInt(product.wbNmId!);
+              const updateData: any = {};
+              let hasChanges = false;
 
-            // Если товар не найден в WB - пропускаем без ошибки
-            if (priceNotFound && (!stockInfo || stockNotFound)) {
-              console.log(`ℹ️ [Sync Products Cron] Товар ${product.name} (${nmId}) не найден в WB - пропускаем`);
-              continue;
-            }
-
-            // Обновляем данные в БД
-            const updateData: any = {};
-            let hasChanges = false;
-
-            // Обновляем цену если получили
-            if (priceInfo.success && priceInfo.data) {
-              const wbPrice = priceInfo.data.price;
-              if (Math.abs(wbPrice - (product.discountPrice || 0)) > 0.01) {
+              // Обновляем цену если получили
+              const wbPrice = pricesMap.get(nmId);
+              if (wbPrice && Math.abs(wbPrice - (product.discountPrice || 0)) > 0.01) {
                 updateData.discountPrice = wbPrice;
                 updateData.price = wbPrice;
                 hasChanges = true;
-                console.log(`💰 [Sync Products Cron] Товар ${product.name}: цена обновлена ${product.discountPrice}₽ → ${wbPrice}₽`);
+                console.log(`💰 [Sync Products Cron] ${product.name}: ${product.discountPrice}₽ → ${wbPrice}₽`);
               }
-            }
 
-            // Обновляем остатки если получили
-            if (stockInfo && stockInfo.success && stockInfo.data && stockInfo.data.wbStocks) {
-              const totalStock = stockInfo.data.wbStocks.reduce((sum: number, s: any) => sum + s.amount, 0);
-              if (totalStock !== product.stock) {
-                updateData.stock = totalStock;
-                hasChanges = true;
-                console.log(`📦 [Sync Products Cron] Товар ${product.name}: остаток обновлен ${product.stock} → ${totalStock}`);
+              // Обновляем остатки если получили
+              if (stocksMap.has(nmId)) {
+                const totalStock = stocksMap.get(nmId);
+                if (totalStock !== product.stock) {
+                  updateData.stock = totalStock;
+                  hasChanges = true;
+                  console.log(`📦 [Sync Products Cron] ${product.name}: ${product.stock} → ${totalStock} шт`);
+                }
               }
-            }
 
-            // Сохраняем изменения если есть
-            if (hasChanges) {
-              await safePrismaOperation(
-                () => prisma.product.update({
-                  where: { id: product.id },
-                  data: updateData
-                }),
-                `обновление товара ${product.id}`
-              );
-              synced++;
-            }
-
-            // Задержка между товарами (чтобы не перегружать WB API)
-            await new Promise(resolve => setTimeout(resolve, 5000));
-
-          } catch (error) {
-            // Проверяем на ошибки с лимитами
-            const isRateLimitError = error instanceof Error && error.message.includes('Превышен лимит');
-            if (isRateLimitError) {
-              rateLimitErrors++;
-              console.log(`⚠️ [Sync Products Cron] Лимит WB API превышен для товара ${product.name}`);
-            } else {
+              // Сохраняем изменения если есть
+              if (hasChanges) {
+                await safePrismaOperation(
+                  () => prisma.product.update({
+                    where: { id: product.id },
+                    data: updateData
+                  }),
+                  `обновление товара ${product.id}`
+                );
+                synced++;
+              }
+            } catch (error) {
               failed++;
-              console.error(`❌ [Sync Products Cron] Ошибка синхронизации товара ${product.name}:`, error);
+              console.error(`❌ [Sync Products Cron] Ошибка обновления ${product.name}:`, error);
             }
+          }
+        } catch (error: any) {
+          // Проверяем на ошибки с лимитами
+          if (error.message?.includes('Превышен лимит')) {
+            rateLimitErrors++;
+            console.log(`⚠️ [Sync Products Cron] Лимит WB API превышен для кабинета ${cabinet.name}`);
+          } else {
+            console.error(`❌ [Sync Products Cron] Ошибка синхронизации кабинета ${cabinet.name}:`, error);
           }
         }
 
