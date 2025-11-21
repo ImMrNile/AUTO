@@ -269,6 +269,46 @@ async function sendInitialMessage(chat: any, product: any, weeklyBudget: number,
       apiKey: process.env.OPENAI_API_KEY,
     });
 
+    // Получаем расширенные данные оптимизации (поисковые запросы, конверсии, кампании)
+    console.log(`   🔍 Загрузка данных оптимизации (до 12 недель)...`);
+    let optimizationData: any = null;
+    
+    if (cabinet?.apiToken && product.wbNmId) {
+      try {
+        // Вызываем API напрямую (внутренний запрос)
+        const baseUrl = process.env.VERCEL_URL 
+          ? `https://${process.env.VERCEL_URL}` 
+          : 'http://localhost:3000';
+        
+        const response = await fetch(`${baseUrl}/api/products/${product.id}/smart-optimization-data`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${process.env.CRON_SECRET || 'internal'}`,
+            'x-internal-request': 'true'
+          }
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          optimizationData = result.data || result.rawData;
+          
+          console.log(`   ✅ Данные оптимизации загружены:`);
+          console.log(`      • Поисковые запросы: ${optimizationData?.searchQueries?.length || 0}`);
+          console.log(`      • Конверсии: ${optimizationData?.conversionData?.length || 0} периодов`);
+          console.log(`      • Кампании: ${optimizationData?.campaignStats?.length || 0}`);
+          console.log(`      • Ключевые слова: ${optimizationData?.keywordStats?.length || 0}`);
+          console.log(`      • Воронка продаж: ${optimizationData?.salesFunnel?.length || 0} дней`);
+        } else {
+          console.warn(`   ⚠️ Не удалось загрузить данные оптимизации: ${response.status}`);
+        }
+      } catch (error) {
+        console.error(`   ❌ Ошибка загрузки данных оптимизации:`, error);
+        // Продолжаем без данных оптимизации
+      }
+    } else {
+      console.warn(`   ⚠️ Пропускаем загрузку данных оптимизации: нет API токена или nmId`);
+    }
+
     // Формируем сообщение с данными товара
     console.log(`   ✓ Данные товара: название, цены, характеристики`);
     const productData = {
@@ -297,14 +337,49 @@ async function sendInitialMessage(chat: any, product: any, weeklyBudget: number,
     let messageContent = '';
 
     if (chat.chatType === 'unified') {
+      // Формируем секцию с данными оптимизации
+      let optimizationSection = '';
+      if (optimizationData) {
+        optimizationSection = `
+
+ДАННЫЕ ОПТИМИЗАЦИИ (до 12 недель истории):
+
+1. ПОИСКОВЫЕ ЗАПРОСЫ (топ-20 по кликам):
+${optimizationData.searchQueries?.slice(0, 20).map((q: any, i: number) => 
+  `   ${i+1}. "${q.keyword}" - ${q.clicks} кликов, ${q.ctr?.toFixed(2)}% CTR, ${q.orders || 0} заказов`
+).join('\n') || '   Нет данных'}
+
+2. КОНВЕРСИЯ И ВОРОНКА:
+${optimizationData.conversionData?.map((c: any) => 
+  `   • Просмотры: ${c.statistic?.selected?.openCount || 0}, В корзину: ${c.statistic?.selected?.addToCartCount || 0}, Заказы: ${c.statistic?.selected?.orderCount || 0}`
+).join('\n') || '   Нет данных'}
+
+3. РЕКЛАМНЫЕ КАМПАНИИ (активные):
+${optimizationData.campaignStats?.filter((c: any) => c.status === 9).slice(0, 10).map((c: any) => 
+  `   • ${c.name}: бюджет ${c.budget}₽, показы ${c.views || 0}, клики ${c.clicks || 0}, CTR ${c.ctr?.toFixed(2)}%`
+).join('\n') || '   Нет активных кампаний'}
+
+4. ЭФФЕКТИВНЫЕ КЛЮЧЕВЫЕ СЛОВА (топ-10):
+${optimizationData.keywordStats?.slice(0, 10).map((k: any, i: number) => 
+  `   ${i+1}. "${k.keyword}" - ${k.clicks} кликов, ${k.orders || 0} заказов, ROI ${k.roi?.toFixed(0)}%`
+).join('\n') || '   Нет данных'}
+
+5. ДИНАМИКА ПРОДАЖ (последние 7 дней):
+${optimizationData.salesFunnel?.[0]?.history?.slice(-7).map((d: any) => 
+  `   ${d.date}: ${d.orders || 0} заказов, ${d.revenue || 0}₽ выручка`
+).join('\n') || '   Нет данных'}
+`;
+      }
+
       messageContent = `
 🤖 ЗАПУСК УНИВЕРСАЛЬНОЙ AI ОПТИМИЗАЦИИ
 
 ТОВАР: ${product.name}
 БЮДЖЕТ: ${weeklyBudget}₽ на неделю (${Math.round(weeklyBudget / 7)}₽ в день)
 
-Текущие данные товара:
+БАЗОВЫЕ ДАННЫЕ ТОВАРА:
 ${JSON.stringify(productData, null, 2)}
+${optimizationSection}
 
 ТВОЯ РОЛЬ:
 Ты - универсальный AI агент по оптимизации товаров на Wildberries. Ты самостоятельно анализируешь ВСЕ аспекты товара и принимаешь решения по оптимизации.
