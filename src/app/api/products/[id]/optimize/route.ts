@@ -411,7 +411,10 @@ ${JSON.stringify(productData, null, 2)}
     const maxAttempts = 30; // 30 попыток по 2 секунды = 60 секунд
     
     while (attempts < maxAttempts) {
-      run = await openai.beta.threads.runs.retrieve(run.id, chat.aiThreadId);
+      // Получаем статус Run
+      run = await openai.beta.threads.runs.retrieve(run.id, {
+        thread_id: chat.aiThreadId
+      });
       
       if (run.status === 'completed') {
         console.log(`✅ [AI] Run завершен для ${chat.chatType}`);
