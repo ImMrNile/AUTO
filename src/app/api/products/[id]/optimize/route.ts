@@ -45,7 +45,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const body = await request.json();
     const {
       weeklyBudget = 1000, // Бюджет на неделю по умолчанию 1000₽
-      optimizationType = 'both' // both | promotion | content
+      optimizationType = 'unified' // unified | both | promotion | content (для обратной совместимости)
     } = body;
 
     console.log(`🤖 [AI] Запуск оптимизации товара ${productId} для пользователя ${userId}`);
@@ -86,36 +86,51 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // 5. Создаем чаты AI
     const createdChats = [];
 
-    // Создаем чат для продвижения
-    if (optimizationType === 'both' || optimizationType === 'promotion') {
-      const promotionChat = await createAiChat({
+    // Для unified создаем один универсальный чат
+    if (optimizationType === 'unified') {
+      const unifiedChat = await createAiChat({
         productId,
         userId,
-        chatType: 'promotion',
-        title: 'Оптимизация продвижения',
+        chatType: 'unified',
+        title: 'Универсальная AI оптимизация',
         dailyBudget,
         weeklyBudget,
         startDate,
         endDate,
         assistantId: process.env.OPENAI_ASSISTANT_ID || 'asst_NpQhCcbeA4ueRdrGR9BgYktN'
       });
-      createdChats.push(promotionChat);
-    }
+      createdChats.push(unifiedChat);
+    } else {
+      // Для обратной совместимости: создаем отдельные чаты
+      if (optimizationType === 'both' || optimizationType === 'promotion') {
+        const promotionChat = await createAiChat({
+          productId,
+          userId,
+          chatType: 'promotion',
+          title: 'Оптимизация продвижения',
+          dailyBudget,
+          weeklyBudget,
+          startDate,
+          endDate,
+          assistantId: process.env.OPENAI_ASSISTANT_ID || 'asst_NpQhCcbeA4ueRdrGR9BgYktN'
+        });
+        createdChats.push(promotionChat);
+      }
 
-    // Создаем чат для контента
-    if (optimizationType === 'both' || optimizationType === 'content') {
-      const contentChat = await createAiChat({
-        productId,
-        userId,
-        chatType: 'content',
-        title: 'Оптимизация контента',
-        dailyBudget: 0, // Контент не имеет бюджета
-        weeklyBudget: 0,
-        startDate,
-        endDate,
-        assistantId: process.env.OPENAI_CONTENT_ASSISTANT_ID || 'asst_IClCvs26y24HB6FqQdoRwERw'
-      });
-      createdChats.push(contentChat);
+      if (optimizationType === 'both' || optimizationType === 'content') {
+        const contentChat = await createAiChat({
+          productId,
+          userId,
+          chatType: 'content',
+          title: 'Оптимизация контента',
+          dailyBudget: 0,
+          weeklyBudget: 0,
+          startDate,
+          endDate,
+          assistantId: process.env.OPENAI_CONTENT_ASSISTANT_ID || 'asst_IClCvs26y24HB6FqQdoRwERw'
+        });
+        createdChats.push(contentChat);
+      }
     }
 
     // 6. Отправляем начальные сообщения AI
@@ -251,7 +266,52 @@ async function sendInitialMessage(chat: any, product: any, weeklyBudget: number)
 
     let messageContent = '';
 
-    if (chat.chatType === 'promotion') {
+    if (chat.chatType === 'unified') {
+      messageContent = `
+🤖 ЗАПУСК УНИВЕРСАЛЬНОЙ AI ОПТИМИЗАЦИИ
+
+ТОВАР: ${product.name}
+БЮДЖЕТ: ${weeklyBudget}₽ на неделю (${Math.round(weeklyBudget / 7)}₽ в день)
+
+Текущие данные товара:
+${JSON.stringify(productData, null, 2)}
+
+ТВОЯ РОЛЬ:
+Ты - универсальный AI агент по оптимизации товаров на Wildberries. Ты самостоятельно анализируешь ВСЕ аспекты товара и принимаешь решения по оптимизации.
+
+ЗАДАЧИ:
+1. АНАЛИЗ:
+   - Изучи все данные: продажи, аналитику, конверсию, CTR
+   - Определи текущие проблемы и возможности
+   - Найди узкие места в воронке продаж
+
+2. ПРИНЯТИЕ РЕШЕНИЙ:
+   - Самостоятельно определи, что нужно оптимизировать:
+     * Рекламные кампании (ставки, ключевые слова, бюджет)
+     * Контент (название, описание, характеристики)
+     * Цены и скидки
+     * SEO и позиции в поиске
+   - Приоритизируй действия по влиянию на продажи
+
+3. РЕАЛИЗАЦИЯ:
+   - Автоматически применяй улучшения
+   - Управляй бюджетом ${weeklyBudget}₽ эффективно
+   - Отслеживай результаты и корректируй стратегию
+
+4. ОТЧЕТНОСТЬ:
+   - Предоставляй детальные отчеты о действиях
+   - Объясняй принятые решения с цифрами
+   - Прогнозируй результаты
+
+ЦЕЛЕВЫЕ ПОКАЗАТЕЛИ:
+- CTR рекламы: > 8% (отлично > 15%)
+- Конверсия в корзину: > 15% (отлично > 25%)
+- ROI рекламы: > 200% (отлично > 400%)
+- Рост продаж: +20% за неделю
+
+Начни с анализа текущей ситуации и предложи первые действия.
+      `.trim();
+    } else if (chat.chatType === 'promotion') {
       messageContent = `
 🎯 ЗАПУСК ОПТИМИЗАЦИИ ПРОДВИЖЕНИЯ
 

@@ -1498,7 +1498,7 @@ export default function ProductsWithAnalytics({ cabinetId }: ProductsWithAnalyti
                   ) : (
                     <div className="flex flex-col md:flex-row items-end md:items-center gap-1 md:gap-2 justify-end">
                       <div className="text-base md:text-xl font-bold text-gray-900" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
-                        {product.discountPrice.toLocaleString('ru-RU')} ₽
+                        {(product.discountPrice || 0).toLocaleString('ru-RU')} ₽
                       </div>
                       <button
                         onClick={() => setEditingPriceInline({
@@ -1789,7 +1789,7 @@ export default function ProductsWithAnalytics({ cabinetId }: ProductsWithAnalyti
                             <span className="text-gray-600">Базовая цена:</span>
                             <div className="flex items-center gap-2">
                               <span className="text-gray-900 font-semibold">
-                                {product.price.toLocaleString('ru-RU')} ₽
+                                {(product.price || 0).toLocaleString('ru-RU')} ₽
                               </span>
                               <button
                                 onClick={() => setEditingPrice({
@@ -1808,7 +1808,7 @@ export default function ProductsWithAnalytics({ cabinetId }: ProductsWithAnalyti
                             <span className="text-gray-600">Цена со скидкой:</span>
                             <div className="flex items-center gap-2">
                               <span className="text-green-600 font-semibold">
-                                {product.discountPrice.toLocaleString('ru-RU')} ₽
+                                {(product.discountPrice || 0).toLocaleString('ru-RU')} ₽
                               </span>
                               {product.discount > 0 && (
                                 <>
@@ -1971,12 +1971,12 @@ export default function ProductsWithAnalytics({ cabinetId }: ProductsWithAnalyti
                         ) : (
                           <div className="flex items-center gap-1.5">
                             <span className="text-orange-600 font-semibold">
-                              {product.costPrice.toLocaleString('ru-RU')} ₽
+                              {(product.costPrice || 0).toLocaleString('ru-RU')} ₽
                             </span>
                             <button
                               onClick={() => setEditingCostPrice({
                                 nmID: product.nmID,
-                                value: product.costPrice
+                                value: product.costPrice || 0
                               })}
                               className="p-1 text-gray-400 hover:text-blue-400 transition-colors"
                               title="Редактировать себестоимость"

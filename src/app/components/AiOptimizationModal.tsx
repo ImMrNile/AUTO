@@ -44,7 +44,6 @@ export default function AiOptimizationModal({
   onOptimizationStarted
 }: AiOptimizationModalProps) {
   const [weeklyBudget, setWeeklyBudget] = useState(1000);
-  const [optimizationType, setOptimizationType] = useState<'both' | 'promotion' | 'content'>('both');
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,7 +71,7 @@ export default function AiOptimizationModal({
         },
         body: JSON.stringify({
           weeklyBudget,
-          optimizationType
+          optimizationType: 'unified' // Единый универсальный агент
         })
       });
 
@@ -98,7 +97,7 @@ export default function AiOptimizationModal({
     } finally {
       setIsStarting(false);
     }
-  }, [weeklyBudget, optimizationType, productId, onOptimizationStarted, onClose]);
+  }, [weeklyBudget, productId, onOptimizationStarted, onClose]);
 
   if (!isOpen) return null;
 
@@ -152,81 +151,20 @@ export default function AiOptimizationModal({
             </p>
           </div>
 
-          {/* Optimization Type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-3">
-              Тип оптимизации
-            </label>
-            <div className="space-y-2">
-              <label className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                <input
-                  type="radio"
-                  name="optimizationType"
-                  value="both"
-                  checked={optimizationType === 'both'}
-                  onChange={(e) => setOptimizationType(e.target.value as any)}
-                  className="w-4 h-4 text-purple-600 focus:ring-purple-500"
-                />
-                <div className="ml-3 flex items-center gap-2">
-                  <Zap className="w-5 h-5 text-purple-600" />
-                  <div>
-                    <div className="font-medium text-gray-900">Комплексная оптимизация</div>
-                    <div className="text-sm text-gray-600">Продвижение + Контент</div>
-                  </div>
-                </div>
-              </label>
-
-              <label className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                <input
-                  type="radio"
-                  name="optimizationType"
-                  value="promotion"
-                  checked={optimizationType === 'promotion'}
-                  onChange={(e) => setOptimizationType(e.target.value as any)}
-                  className="w-4 h-4 text-purple-600 focus:ring-purple-500"
-                />
-                <div className="ml-3 flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-green-600" />
-                  <div>
-                    <div className="font-medium text-gray-900">Продвижение</div>
-                    <div className="text-sm text-gray-600">Рекламные кампании, ставки, бюджет</div>
-                  </div>
-                </div>
-              </label>
-
-              <label className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                <input
-                  type="radio"
-                  name="optimizationType"
-                  value="content"
-                  checked={optimizationType === 'content'}
-                  onChange={(e) => setOptimizationType(e.target.value as any)}
-                  className="w-4 h-4 text-purple-600 focus:ring-purple-500"
-                />
-                <div className="ml-3 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-blue-600" />
-                  <div>
-                    <div className="font-medium text-gray-900">Контент</div>
-                    <div className="text-sm text-gray-600">Название, описание, характеристики</div>
-                  </div>
-                </div>
-              </label>
-            </div>
-          </div>
-
           {/* Info */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
             <div className="flex items-start gap-3">
-              <Calendar className="w-5 h-5 text-blue-600 mt-0.5" />
+              <Sparkles className="w-5 h-5 text-purple-600 mt-0.5" />
               <div>
-                <h4 className="font-medium text-blue-900 mb-1">
-                  Что будет происходить?
+                <h4 className="font-medium text-purple-900 mb-2">
+                  🤖 Универсальный AI агент
                 </h4>
-                <ul className="text-sm text-blue-800 space-y-1">
-                  <li>• AI проанализирует текущую ситуацию товара</li>
-                  <li>• Создаст индивидуальный план оптимизации</li>
-                  <li>• Будет автоматически управлять в течение недели</li>
-                  <li>• Отправит отчеты о результатах</li>
+                <ul className="text-sm text-gray-700 space-y-1.5">
+                  <li>• Анализирует все данные товара (продажи, аналитика, реклама)</li>
+                  <li>• Самостоятельно определяет проблемы и возможности</li>
+                  <li>• Принимает решения по оптимизации (цены, реклама, контент)</li>
+                  <li>• Автоматически применяет улучшения в течение недели</li>
+                  <li>• Предоставляет детальные отчеты о результатах</li>
                 </ul>
               </div>
             </div>
