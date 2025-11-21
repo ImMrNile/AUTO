@@ -53,6 +53,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     console.log(`   Тип: ${optimizationType}`);
 
     // 3. Проверяем товар и получаем данные
+    console.log(`📦 [AI] Шаг 1/5: Загрузка данных товара из БД...`);
     const product = await prisma.product.findFirst({
       where: {
         id: productId,
@@ -67,12 +68,30 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
             value: true,
             isRequired: true
           }
+        },
+        productCabinets: {
+          where: { isSelected: true },
+          include: { cabinet: true }
         }
       }
     });
 
     if (!product) {
       return NextResponse.json({ error: 'Товар не найден' }, { status: 404 });
+    }
+
+    console.log(`✅ [AI] Товар загружен: ${product.name}`);
+    console.log(`   📊 Аналитика: ${product.analytics ? 'Есть' : 'Нет'}`);
+    console.log(`   🏷️ Категория: ${product.subcategory?.name || 'Не указана'}`);
+    console.log(`   📝 Характеристик: ${product.characteristics?.length || 0}`);
+    console.log(`   💰 Цена: ${product.price}₽ → ${product.discountPrice}₽ (скидка ${product.discount}%)`);
+    
+    // Получаем кабинет для доступа к WB API
+    const cabinet = product.productCabinets[0]?.cabinet;
+    if (!cabinet || !cabinet.apiToken) {
+      console.warn(`⚠️ [AI] Кабинет не настроен для товара`);
+    } else {
+      console.log(`✅ [AI] Кабинет WB подключен: ${cabinet.name}`);
     }
 
     // 4. Рассчитываем бюджет
@@ -84,10 +103,14 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     console.log(`💰 [AI] Бюджет: ${dailyBudget}₽/день, ${weeklyBudget}₽/неделя`);
 
     // 5. Создаем чаты AI
+    console.log(`🧵 [AI] Шаг 2/5: Создание AI чата...`);
     const createdChats = [];
 
     // Для unified создаем один универсальный чат
     if (optimizationType === 'unified') {
+      console.log(`   Тип чата: Универсальный агент`);
+      console.log(`   Assistant ID: ${process.env.OPENAI_ASSISTANT_ID || 'asst_NpQhCcbeA4ueRdrGR9BgYktN'}`);
+      
       const unifiedChat = await createAiChat({
         productId,
         userId,
@@ -100,6 +123,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         assistantId: process.env.OPENAI_ASSISTANT_ID || 'asst_NpQhCcbeA4ueRdrGR9BgYktN'
       });
       createdChats.push(unifiedChat);
+      console.log(`✅ [AI] Чат создан: ${unifiedChat.id}`);
     } else {
       // Для обратной совместимости: создаем отдельные чаты
       if (optimizationType === 'both' || optimizationType === 'promotion') {
@@ -134,8 +158,11 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
 
     // 6. Отправляем начальные сообщения AI
+    console.log(`📤 [AI] Шаг 3/5: Подготовка данных для AI агента...`);
+    console.log(`   Собираем: аналитику, цены, характеристики, историю продаж`);
+    
     for (const chat of createdChats) {
-      await sendInitialMessage(chat, product, weeklyBudget);
+      await sendInitialMessage(chat, product, weeklyBudget, cabinet);
     }
 
     console.log(`✅ [AI] Создано ${createdChats.length} чатов оптимизации для товара ${product.name}`);
@@ -229,18 +256,21 @@ async function createAiChat(params: {
 /**
  * Отправляет начальное сообщение AI с данными товара
  */
-async function sendInitialMessage(chat: any, product: any, weeklyBudget: number) {
+async function sendInitialMessage(chat: any, product: any, weeklyBudget: number, cabinet?: any) {
   if (!process.env.OPENAI_API_KEY || !chat.aiThreadId) {
     console.warn(`⚠️ [AI] Нет API ключа или Thread для ${chat.chatType}`);
     return;
   }
 
   try {
+    console.log(`📊 [AI] Формирование данных для ${chat.chatType}...`);
+    
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
 
     // Формируем сообщение с данными товара
+    console.log(`   ✓ Данные товара: название, цены, характеристики`);
     const productData = {
       id: product.id,
       name: product.name,
@@ -359,17 +389,86 @@ ${JSON.stringify(productData, null, 2)}
     }
 
     // Отправляем сообщение
+    console.log(`📤 [AI] Шаг 4/5: Отправка данных AI агенту...`);
+    console.log(`   Thread ID: ${chat.aiThreadId}`);
+    console.log(`   Размер данных: ${Math.round(messageContent.length / 1024)}KB`);
+    
     await openai.beta.threads.messages.create(chat.aiThreadId, {
       role: 'user',
       content: messageContent
     });
 
     // Запускаем Assistant
-    const run = await openai.beta.threads.runs.create(chat.aiThreadId, {
+    console.log(`🤖 [AI] Шаг 5/5: Запуск AI агента...`);
+    let run = await openai.beta.threads.runs.create(chat.aiThreadId, {
       assistant_id: chat.aiAssistantId
     });
 
-    // Сохраняем сообщение в БД
+    console.log(`🚀 [AI] Run запущен: ${run.id}`);
+
+    // Ждем завершения Run (максимум 60 секунд)
+    let attempts = 0;
+    const maxAttempts = 30; // 30 попыток по 2 секунды = 60 секунд
+    
+    while (attempts < maxAttempts) {
+      run = await openai.beta.threads.runs.retrieve(run.id, chat.aiThreadId);
+      
+      if (run.status === 'completed') {
+        console.log(`✅ [AI] Run завершен для ${chat.chatType}`);
+        
+        // Получаем ответ Assistant
+        const messages = await openai.beta.threads.messages.list(chat.aiThreadId, {
+          limit: 1,
+          order: 'desc'
+        });
+        
+        const assistantMessage = messages.data[0];
+        if (assistantMessage && assistantMessage.role === 'assistant') {
+          const content = assistantMessage.content[0];
+          const responseText = content.type === 'text' ? content.text.value : '';
+          
+          console.log(`💬 [AI] Ответ от ${chat.chatType}:`, responseText.substring(0, 200) + '...');
+          
+          // Сохраняем ответ в БД
+          await prisma.productAiMessage.create({
+            data: {
+              chatId: chat.id,
+              role: 'assistant',
+              content: responseText,
+              metadata: {
+                type: 'initial_response',
+                runId: run.id
+              }
+            }
+          });
+        }
+        break;
+      } else if (run.status === 'failed' || run.status === 'cancelled' || run.status === 'expired') {
+        console.error(`❌ [AI] Run завершился с ошибкой для ${chat.chatType}: ${run.status}`);
+        if (run.last_error) {
+          console.error(`   Ошибка:`, run.last_error);
+        }
+        break;
+      } else if (run.status === 'requires_action') {
+        console.log(`⚠️ [AI] Run требует действий для ${chat.chatType}`);
+        // TODO: Обработка function calling если нужно
+        break;
+      }
+      
+      // Ждем 2 секунды перед следующей проверкой
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      attempts++;
+      
+      if (attempts % 5 === 0) {
+        console.log(`⏳ [AI] Ожидание ответа от ${chat.chatType}... (${attempts * 2}с)`);
+      }
+    }
+
+    if (attempts >= maxAttempts) {
+      console.warn(`⚠️ [AI] Превышено время ожидания для ${chat.chatType}`);
+    }
+
+    // Сохраняем начальное сообщение пользователя в БД
     await prisma.productAiMessage.create({
       data: {
         chatId: chat.id,
@@ -378,15 +477,13 @@ ${JSON.stringify(productData, null, 2)}
         metadata: {
           type: 'initial_message',
           productData,
-          weeklyBudget
+          weeklyBudget,
+          runId: run.id
         }
       }
     });
 
-    console.log(`✅ [AI] Отправлено начальное сообщение для ${chat.chatType}`);
-
-    // Ждем завершения (асинхронно)
-    // В реальном приложении это можно делать в фоне или через вебхуки
+    console.log(`✅ [AI] Обработка сообщения для ${chat.chatType} завершена`);
 
   } catch (error) {
     console.error(`❌ [AI] Ошибка отправки сообщения для ${chat.chatType}:`, error);

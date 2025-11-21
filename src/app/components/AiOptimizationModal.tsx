@@ -46,6 +46,7 @@ export default function AiOptimizationModal({
   const [weeklyBudget, setWeeklyBudget] = useState(1000);
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string>('');
 
   const dailyBudget = Math.round(weeklyBudget / 7);
 
@@ -62,8 +63,16 @@ export default function AiOptimizationModal({
 
     setIsStarting(true);
     setError(null);
+    setProgress('🔄 Инициализация...');
 
     try {
+      setProgress('📦 Загрузка данных товара...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      setProgress('🧵 Создание AI чата...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      setProgress('📊 Подготовка аналитики...');
       const response = await fetch(`/api/products/${productId}/optimize`, {
         method: 'POST',
         headers: {
@@ -75,6 +84,7 @@ export default function AiOptimizationModal({
         })
       });
 
+      setProgress('🤖 Запуск AI агента...');
       const result: OptimizationResult = await response.json();
 
       if (!response.ok) {
@@ -170,6 +180,19 @@ export default function AiOptimizationModal({
             </div>
           </div>
 
+          {/* Progress */}
+          {isStarting && progress && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                <div>
+                  <p className="text-sm font-medium text-blue-900">{progress}</p>
+                  <p className="text-xs text-blue-700 mt-1">Пожалуйста, подождите...</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Error */}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -195,7 +218,7 @@ export default function AiOptimizationModal({
             {isStarting ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Запуск...
+                {progress || 'Запуск...'}
               </>
             ) : (
               <>
