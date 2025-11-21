@@ -269,45 +269,10 @@ async function sendInitialMessage(chat: any, product: any, weeklyBudget: number,
       apiKey: process.env.OPENAI_API_KEY,
     });
 
-    // Получаем расширенные данные оптимизации (поисковые запросы, конверсии, кампании)
-    console.log(`   🔍 Загрузка данных оптимизации (до 12 недель)...`);
+    // ВРЕМЕННО ОТКЛЮЧЕНО: Получаем расширенные данные оптимизации
+    // TODO: Исправить авторизацию для внутренних запросов
+    console.log(`   ⏭️ Пропускаем загрузку данных оптимизации (временно отключено)`);
     let optimizationData: any = null;
-    
-    if (cabinet?.apiToken && product.wbNmId) {
-      try {
-        // Вызываем API напрямую (внутренний запрос)
-        const baseUrl = process.env.VERCEL_URL 
-          ? `https://${process.env.VERCEL_URL}` 
-          : 'http://localhost:3000';
-        
-        const response = await fetch(`${baseUrl}/api/products/${product.id}/smart-optimization-data`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${process.env.CRON_SECRET || 'internal'}`,
-            'x-internal-request': 'true'
-          }
-        });
-        
-        if (response.ok) {
-          const result = await response.json();
-          optimizationData = result.data || result.rawData;
-          
-          console.log(`   ✅ Данные оптимизации загружены:`);
-          console.log(`      • Поисковые запросы: ${optimizationData?.searchQueries?.length || 0}`);
-          console.log(`      • Конверсии: ${optimizationData?.conversionData?.length || 0} периодов`);
-          console.log(`      • Кампании: ${optimizationData?.campaignStats?.length || 0}`);
-          console.log(`      • Ключевые слова: ${optimizationData?.keywordStats?.length || 0}`);
-          console.log(`      • Воронка продаж: ${optimizationData?.salesFunnel?.length || 0} дней`);
-        } else {
-          console.warn(`   ⚠️ Не удалось загрузить данные оптимизации: ${response.status}`);
-        }
-      } catch (error) {
-        console.error(`   ❌ Ошибка загрузки данных оптимизации:`, error);
-        // Продолжаем без данных оптимизации
-      }
-    } else {
-      console.warn(`   ⚠️ Пропускаем загрузку данных оптимизации: нет API токена или nmId`);
-    }
 
     // Формируем сообщение с данными товара
     console.log(`   ✓ Данные товара: название, цены, характеристики`);
@@ -337,85 +302,78 @@ async function sendInitialMessage(chat: any, product: any, weeklyBudget: number,
     let messageContent = '';
 
     if (chat.chatType === 'unified') {
-      // Формируем секцию с данными оптимизации
+      // Формируем секцию с данными оптимизации (компактная версия для AI)
       let optimizationSection = '';
       if (optimizationData) {
-        optimizationSection = `
+        try {
+          // Топ-10 запросов вместо 20
+          const topQueries = optimizationData.searchQueries?.slice(0, 10) || [];
+          
+          // Суммарная конверсия
+          const totalConversion = optimizationData.conversionData?.reduce((acc: any, c: any) => ({
+            views: (acc.views || 0) + (c.statistic?.selected?.openCount || 0),
+            addToCart: (acc.addToCart || 0) + (c.statistic?.selected?.addToCartCount || 0),
+            orders: (acc.orders || 0) + (c.statistic?.selected?.orderCount || 0)
+          }), {}) || {};
+          
+          // Топ-5 кампаний
+          const topCampaigns = optimizationData.campaignStats?.filter((c: any) => c.status === 9).slice(0, 5) || [];
+          
+          // Топ-5 ключевых слов
+          const topKeywords = optimizationData.keywordStats?.slice(0, 5) || [];
 
-ДАННЫЕ ОПТИМИЗАЦИИ (до 12 недель истории):
+          optimizationSection = `
 
-1. ПОИСКОВЫЕ ЗАПРОСЫ (топ-20 по кликам):
-${optimizationData.searchQueries?.slice(0, 20).map((q: any, i: number) => 
-  `   ${i+1}. "${q.keyword}" - ${q.clicks} кликов, ${q.ctr?.toFixed(2)}% CTR, ${q.orders || 0} заказов`
+ДАННЫЕ ОПТИМИЗАЦИИ (последние недели):
+
+1. ТОП ПОИСКОВЫЕ ЗАПРОСЫ:
+${topQueries.map((q: any, i: number) => 
+  `   ${i+1}. "${q.keyword}" - ${q.clicks} кликов, CTR ${(q.ctr || 0).toFixed(1)}%`
 ).join('\n') || '   Нет данных'}
 
-2. КОНВЕРСИЯ И ВОРОНКА:
-${optimizationData.conversionData?.map((c: any) => 
-  `   • Просмотры: ${c.statistic?.selected?.openCount || 0}, В корзину: ${c.statistic?.selected?.addToCartCount || 0}, Заказы: ${c.statistic?.selected?.orderCount || 0}`
-).join('\n') || '   Нет данных'}
+2. КОНВЕРСИЯ:
+   Просмотры: ${totalConversion.views || 0} → Корзина: ${totalConversion.addToCart || 0} → Заказы: ${totalConversion.orders || 0}
+   Конверсия в корзину: ${totalConversion.views ? ((totalConversion.addToCart / totalConversion.views) * 100).toFixed(1) : 0}%
+   Конверсия в заказ: ${totalConversion.addToCart ? ((totalConversion.orders / totalConversion.addToCart) * 100).toFixed(1) : 0}%
 
-3. РЕКЛАМНЫЕ КАМПАНИИ (активные):
-${optimizationData.campaignStats?.filter((c: any) => c.status === 9).slice(0, 10).map((c: any) => 
-  `   • ${c.name}: бюджет ${c.budget}₽, показы ${c.views || 0}, клики ${c.clicks || 0}, CTR ${c.ctr?.toFixed(2)}%`
+3. АКТИВНЫЕ КАМПАНИИ:
+${topCampaigns.map((c: any) => 
+  `   • ${c.name}: ${c.budget}₽, CTR ${(c.ctr || 0).toFixed(1)}%`
 ).join('\n') || '   Нет активных кампаний'}
 
-4. ЭФФЕКТИВНЫЕ КЛЮЧЕВЫЕ СЛОВА (топ-10):
-${optimizationData.keywordStats?.slice(0, 10).map((k: any, i: number) => 
-  `   ${i+1}. "${k.keyword}" - ${k.clicks} кликов, ${k.orders || 0} заказов, ROI ${k.roi?.toFixed(0)}%`
-).join('\n') || '   Нет данных'}
-
-5. ДИНАМИКА ПРОДАЖ (последние 7 дней):
-${optimizationData.salesFunnel?.[0]?.history?.slice(-7).map((d: any) => 
-  `   ${d.date}: ${d.orders || 0} заказов, ${d.revenue || 0}₽ выручка`
+4. ЭФФЕКТИВНЫЕ КЛЮЧЕВЫЕ СЛОВА:
+${topKeywords.map((k: any, i: number) => 
+  `   ${i+1}. "${k.keyword}" - ${k.clicks} кликов, ${k.orders || 0} заказов`
 ).join('\n') || '   Нет данных'}
 `;
+        } catch (error) {
+          console.error(`   ❌ Ошибка форматирования данных оптимизации:`, error);
+          optimizationSection = '\n(Данные оптимизации недоступны)';
+        }
       }
 
-      messageContent = `
-🤖 ЗАПУСК УНИВЕРСАЛЬНОЙ AI ОПТИМИЗАЦИИ
+      messageContent = `Запуск AI оптимизации для товара "${product.name || 'Без названия'}".
 
-ТОВАР: ${product.name}
-БЮДЖЕТ: ${weeklyBudget}₽ на неделю (${Math.round(weeklyBudget / 7)}₽ в день)
+Бюджет: ${weeklyBudget}₽ на неделю.
 
-БАЗОВЫЕ ДАННЫЕ ТОВАРА:
-${JSON.stringify(productData, null, 2)}
-${optimizationSection}
+Данные товара:
+- ID: ${product.wbNmId || 'не указан'}
+- Категория: ${product.subcategory?.name || 'не указана'}
+- Цена: ${product.price || 0}₽
+- Цена со скидкой: ${product.discountPrice || 0}₽
 
-ТВОЯ РОЛЬ:
-Ты - универсальный AI агент по оптимизации товаров на Wildberries. Ты самостоятельно анализируешь ВСЕ аспекты товара и принимаешь решения по оптимизации.
+Твоя задача:
+1. Проанализируй товар
+2. Определи проблемы и возможности
+3. Предложи план оптимизации
+4. Начни с самых важных действий
 
-ЗАДАЧИ:
-1. АНАЛИЗ:
-   - Изучи все данные: продажи, аналитику, конверсию, CTR
-   - Определи текущие проблемы и возможности
-   - Найди узкие места в воронке продаж
+Целевые показатели:
+- CTR > 8%
+- Конверсия > 15%
+- ROI > 200%
 
-2. ПРИНЯТИЕ РЕШЕНИЙ:
-   - Самостоятельно определи, что нужно оптимизировать:
-     * Рекламные кампании (ставки, ключевые слова, бюджет)
-     * Контент (название, описание, характеристики)
-     * Цены и скидки
-     * SEO и позиции в поиске
-   - Приоритизируй действия по влиянию на продажи
-
-3. РЕАЛИЗАЦИЯ:
-   - Автоматически применяй улучшения
-   - Управляй бюджетом ${weeklyBudget}₽ эффективно
-   - Отслеживай результаты и корректируй стратегию
-
-4. ОТЧЕТНОСТЬ:
-   - Предоставляй детальные отчеты о действиях
-   - Объясняй принятые решения с цифрами
-   - Прогнозируй результаты
-
-ЦЕЛЕВЫЕ ПОКАЗАТЕЛИ:
-- CTR рекламы: > 8% (отлично > 15%)
-- Конверсия в корзину: > 15% (отлично > 25%)
-- ROI рекламы: > 200% (отлично > 400%)
-- Рост продаж: +20% за неделю
-
-Начни с анализа текущей ситуации и предложи первые действия.
-      `.trim();
+Начни с краткого анализа и первых рекомендаций.`.trim();
     } else if (chat.chatType === 'promotion') {
       messageContent = `
 🎯 ЗАПУСК ОПТИМИЗАЦИИ ПРОДВИЖЕНИЯ
@@ -524,7 +482,23 @@ ${JSON.stringify(productData, null, 2)}
       } else if (run.status === 'failed' || run.status === 'cancelled' || run.status === 'expired') {
         console.error(`❌ [AI] Run завершился с ошибкой для ${chat.chatType}: ${run.status}`);
         if (run.last_error) {
-          console.error(`   Ошибка:`, run.last_error);
+          console.error(`   Код ошибки: ${run.last_error.code}`);
+          console.error(`   Сообщение: ${run.last_error.message}`);
+          
+          // Сохраняем ошибку в БД
+          await prisma.productAiMessage.create({
+            data: {
+              chatId: chat.id,
+              role: 'system',
+              content: `Ошибка выполнения: ${run.last_error.message}`,
+              metadata: {
+                type: 'error',
+                runId: run.id,
+                errorCode: run.last_error.code,
+                status: run.status
+              }
+            }
+          });
         }
         break;
       } else if (run.status === 'requires_action') {

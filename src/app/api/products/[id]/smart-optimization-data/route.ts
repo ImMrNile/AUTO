@@ -11,15 +11,28 @@ export async function GET(
   try {
     console.log(`🧠 [Smart Optimization] Умный поиск данных для товара: ${params.id}`);
     
-    const user = await AuthService.getCurrentUser();
-    if (!user?.id) {
-      return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
+    // Проверяем внутренний запрос
+    const isInternalRequest = request.headers.get('x-internal-request') === 'true';
+    const authHeader = request.headers.get('authorization');
+    const cronSecret = process.env.CRON_SECRET;
+    
+    let user;
+    
+    if (isInternalRequest && cronSecret && authHeader === `Bearer ${cronSecret}`) {
+      // Внутренний запрос - пропускаем проверку пользователя
+      console.log(`🔓 [Smart Optimization] Внутренний запрос - пропускаем авторизацию`);
+    } else {
+      // Обычный запрос - проверяем пользователя
+      user = await AuthService.getCurrentUser();
+      if (!user?.id) {
+        return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
+      }
     }
 
     const product = await prisma.product.findFirst({
       where: {
         id: params.id,
-        userId: user.id
+        ...(user?.id && { userId: user.id })
       },
       include: {
         subcategory: true,
