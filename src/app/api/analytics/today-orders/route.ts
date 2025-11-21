@@ -1,9 +1,12 @@
-// src/app/api/analytics/today-orders/route.ts - API для получения заказов за сегодня
+﻿// src/app/api/analytics/today-orders/route.ts - API для получения заказов за сегодня
 
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { prisma } from '../../../../../lib/prisma';
 import { safePrismaOperation } from '../../../../../lib/prisma-utils';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * Получение данных о продажах с WB API

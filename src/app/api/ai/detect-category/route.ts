@@ -2,6 +2,15 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { detectProductCategory } from '../../../../../lib/services/categoryDetectionAgent';
+import sharp from 'sharp';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
+// Максимальный размер изображения для отправки в AI (в пикселях)
+const MAX_IMAGE_WIDTH = 1024;
+const MAX_IMAGE_HEIGHT = 1024;
+const JPEG_QUALITY = 80;
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,25 +54,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Конвертируем файлы в base64 data URLs
+    // Конвертируем файлы в base64 data URLs с сжатием
     const imageDataUrls: string[] = [];
     
     for (let i = 0; i < imageFiles.length; i++) {
       const file = imageFiles[i];
       
-      console.log(`🔄 Конвертация изображения ${i + 1}/${imageFiles.length}: ${file.name}`);
+      console.log(`🔄 Обработка изображения ${i + 1}/${imageFiles.length}: ${file.name} (${Math.round(file.size / 1024)}KB)`);
       
       // Читаем файл как ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
       
+      // Сжимаем изображение с помощью sharp
+      const compressedBuffer = await sharp(buffer)
+        .resize(MAX_IMAGE_WIDTH, MAX_IMAGE_HEIGHT, {
+          fit: 'inside',
+          withoutEnlargement: true
+        })
+        .jpeg({ quality: JPEG_QUALITY })
+        .toBuffer();
+      
       // Конвертируем в base64
-      const base64 = buffer.toString('base64');
-      const mimeType = file.type || 'image/jpeg';
-      const dataUrl = `data:${mimeType};base64,${base64}`;
+      const base64 = compressedBuffer.toString('base64');
+      const dataUrl = `data:image/jpeg;base64,${base64}`;
       
       imageDataUrls.push(dataUrl);
-      console.log(`✅ Изображение ${i + 1} конвертировано (${Math.round(base64.length / 1024)}KB)`);
+      console.log(`✅ Изображение ${i + 1} сжато: ${Math.round(file.size / 1024)}KB → ${Math.round(base64.length / 1024)}KB`);
     }
 
     console.log('📋 [API] Конвертировано изображений:', imageDataUrls.length);

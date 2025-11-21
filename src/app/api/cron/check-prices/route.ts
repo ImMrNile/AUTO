@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { wbApiService } from '../../../../../lib/services/wbApiService';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 /**
  * Cron job для проверки и восстановления закрепленных цен
  * Запускается каждые 30 минут
@@ -12,11 +15,22 @@ export async function GET(request: NextRequest) {
   try {
     console.log('🔄 [Price Check Cron] Начало проверки закрепленных цен...');
 
-    // Проверяем cron secret для безопасности
+    // Проверка авторизации cron запроса
+    // Vercel Cron отправляет заголовок x-vercel-cron: 1
+    // Оркестратор отправляет заголовок x-orchestrator: true
+    // Task scheduler отправляет заголовок x-task-scheduler: true
+    // Keep-alive отправляет заголовок x-keep-alive: true
+    const isVercelCron = request.headers.get('x-vercel-cron') === '1';
+    const isOrchestrator = request.headers.get('x-orchestrator') === 'true';
+    const isTaskScheduler = request.headers.get('x-task-scheduler') === 'true';
+    const isKeepAlive = request.headers.get('x-keep-alive') === 'true';
     const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
     
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    // Разрешаем запросы от Vercel Cron, оркестратора, task scheduler, keep-alive или с правильным CRON_SECRET
+    const isAuthorized = isVercelCron || isOrchestrator || isTaskScheduler || isKeepAlive || (cronSecret && authHeader === `Bearer ${cronSecret}`);
+    
+    if (!isAuthorized) {
       console.warn('⚠️ [Price Check Cron] Неавторизованный запрос');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -59,11 +73,18 @@ export async function GET(request: NextRequest) {
     let checkedCount = 0;
     let restoredCount = 0;
     let errorCount = 0;
+    let rateLimitErrors = 0;
     const results: any[] = [];
 
     // Проверяем каждый товар
     for (const product of lockedProducts) {
       try {
+        // Если уже много ошибок с лимитами - пропускаем оставшиеся товары
+        if (rateLimitErrors >= 2) {
+          console.log(`⚠️ [Price Check Cron] Превышено количество ошибок с лимитами (${rateLimitErrors}), пропускаем оставшиеся товары`);
+          break;
+        }
+
         // Пропускаем если нет кабинета или API токена
         if (!product.productCabinets || product.productCabinets.length === 0) {
           console.warn(`⚠️ [Price Check Cron] Товар ${product.name} (${product.id}): нет кабинета`);
@@ -86,6 +107,32 @@ export async function GET(request: NextRequest) {
         // Получаем текущую цену с WB
         const priceInfo = await wbApiService.getProductPrice(cabinet.apiToken, parseInt(product.wbNmId!));
         
+        // Проверяем на ошибки с лимитами
+        const isRateLimitError = priceInfo.error?.includes('Превышен лимит');
+        if (isRateLimitError) {
+          rateLimitErrors++;
+          console.log(`⚠️ [Price Check Cron] Лимит WB API превышен для товара ${product.name}, пропускаем`);
+          results.push({
+            productId: product.id,
+            productName: product.name,
+            status: 'rate_limit',
+            error: priceInfo.error
+          });
+          continue;
+        }
+        
+        // Если товар не найден в WB - пропускаем без ошибки
+        if (priceInfo.error === 'Товар не найден в Wildberries') {
+          console.log(`ℹ️ [Price Check Cron] Товар ${product.name} (${product.wbNmId}) не найден в WB - пропускаем`);
+          results.push({
+            productId: product.id,
+            productName: product.name,
+            status: 'skipped',
+            reason: 'not_found_in_wb'
+          });
+          continue;
+        }
+        
         if (!priceInfo.success || !priceInfo.data) {
           console.warn(`⚠️ [Price Check Cron] Товар ${product.name}: не удалось получить цену с WB`);
           errorCount++;
@@ -107,7 +154,7 @@ export async function GET(request: NextRequest) {
         if (Math.abs(currentWbPrice - lockedPrice) > 0.01) {
           console.log(`🔄 [Price Check Cron] Восстанавливаем цену для ${product.name}: ${currentWbPrice}₽ → ${lockedPrice}₽`);
           
-          const restoreResult = await wbApiService.setProductDiscountWithRetry(
+          const restoreResult = await wbApiService.setProductPriceWithRetry(
             cabinet.apiToken,
             parseInt(product.wbNmId!),
             lockedPrice,
@@ -157,22 +204,35 @@ export async function GET(request: NextRequest) {
         }
 
         // Задержка между проверками товаров (чтобы не перегружать WB API)
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
       } catch (error) {
-        errorCount++;
-        console.error(`❌ [Price Check Cron] Ошибка проверки товара ${product.name}:`, error);
-        
-        results.push({
-          productId: product.id,
-          productName: product.name,
-          status: 'error',
-          error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        // Проверяем на ошибки с лимитами
+        const isRateLimitError = error instanceof Error && error.message.includes('Превышен лимит');
+        if (isRateLimitError) {
+          rateLimitErrors++;
+          console.log(`⚠️ [Price Check Cron] Лимит WB API превышен для товара ${product.name}`);
+          results.push({
+            productId: product.id,
+            productName: product.name,
+            status: 'rate_limit',
+            error: error.message
+          });
+        } else {
+          errorCount++;
+          console.error(`❌ [Price Check Cron] Ошибка проверки товара ${product.name}:`, error);
+          
+          results.push({
+            productId: product.id,
+            productName: product.name,
+            status: 'error',
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
       }
     }
 
-    console.log(`✅ [Price Check Cron] Завершено. Проверено: ${checkedCount}, восстановлено: ${restoredCount}, ошибок: ${errorCount}`);
+    console.log(`✅ [Price Check Cron] Завершено. Проверено: ${checkedCount}, восстановлено: ${restoredCount}, ошибок: ${errorCount}, лимитов: ${rateLimitErrors}`);
 
     return NextResponse.json({
       success: true,
@@ -180,6 +240,7 @@ export async function GET(request: NextRequest) {
       checked: checkedCount,
       restored: restoredCount,
       errors: errorCount,
+      rateLimitErrors: rateLimitErrors,
       results: results
     });
 

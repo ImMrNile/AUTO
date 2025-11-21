@@ -1,9 +1,12 @@
-// src/app/api/analytics/product-details/route.ts - Детальная финансовая аналитика по товару
+﻿// src/app/api/analytics/product-details/route.ts - Детальная финансовая аналитика по товару
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { WbFinancialCalculator, type WbSaleData, type CategoryCommissions } from '../../../../../lib/services/wbFinancialCalculator';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * GET - Получение детальной финансовой аналитики по товару

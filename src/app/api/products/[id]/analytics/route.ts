@@ -8,6 +8,9 @@ import { WbFinancialCalculator, type WbSaleData, type CategoryCommissions } from
 import { WbAnalyticsService } from '../../../../../../lib/services/wbAnalyticsService';
 import { WbStatisticsService } from '../../../../../../lib/services/wbStatisticsService';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 /**
  * Интерфейс для статистики товара из WB API
  */

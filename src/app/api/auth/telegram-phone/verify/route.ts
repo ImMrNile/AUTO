@@ -1,5 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '../../../../../../lib/prisma'
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/auth/telegram-phone/verify

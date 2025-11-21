@@ -5,6 +5,9 @@ import { prisma } from '../../../../../../lib/prisma';
 import { safePrismaOperation } from '../../../../../../lib/prisma-utils';
 import { AuthService } from '../../../../../../lib/auth/auth-service';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { categoryId: string } }

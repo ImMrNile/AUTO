@@ -3,6 +3,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { localCategoriesService } from '@/lib/services/localCategoriesService';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 // Интерфейсы для типизации
 interface CharacteristicType {
   id: number;

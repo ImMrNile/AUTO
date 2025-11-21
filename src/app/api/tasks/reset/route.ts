@@ -1,7 +1,10 @@
-// API для принудительного сброса зависших фоновых задач
+﻿// API для принудительного сброса зависших фоновых задач
 import { NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { safePrismaOperation } from '../../../../../lib/prisma-utils';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 export async function POST() {
   try {

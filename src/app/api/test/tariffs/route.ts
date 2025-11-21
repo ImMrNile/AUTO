@@ -1,7 +1,10 @@
-// src/app/api/test/tariffs/route.ts - Тестовый endpoint для получения KTR
+﻿// src/app/api/test/tariffs/route.ts - Тестовый endpoint для получения KTR
 
 import { NextRequest, NextResponse } from 'next/server';
 import { WbTariffService } from '@/lib/services/wbTariffService';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/test/tariffs?warehouse=Белая%20дача&token=YOUR_TOKEN

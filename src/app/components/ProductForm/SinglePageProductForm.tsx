@@ -3,9 +3,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { clientLogger } from '@/lib/logger';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Package, Upload, Loader2, Sparkles, BarChart3, Home, CheckCircle, Plus, CloudUpload, Image as ImageIcon, Store, MessageSquare, RefreshCw, X } from 'lucide-react';
-import Step4Results from './Step4Results';
 import { useTaskContext } from '../BackgroundTasks/TaskProvider';
 
 interface Cabinet {
@@ -97,6 +97,7 @@ export default function SinglePageProductForm({
   const [allCategories, setAllCategories] = useState<any[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(false);
   const [showCategorySelector, setShowCategorySelector] = useState(false);
+  const [categorySearchTerm, setCategorySearchTerm] = useState('');
   
   // Состояние создания
   const [isCreating, setIsCreating] = useState(false);
@@ -149,6 +150,34 @@ export default function SinglePageProductForm({
     setSizes(newSizes);
   };
 
+  // 🔥 Функция очистки формы после успешной отправки
+  const resetForm = () => {
+    clientLogger.log('🧹 Очистка формы...');
+    setProductName('');
+    setPackageContents('Товар - 1 шт., упаковка - 1 шт.');
+    setPrice('');
+    setDiscountPrice('');
+    setCostPrice('');
+    setVendorCode('');
+    setBarcode('');
+    setImageComments('');
+    setMainImage(null);
+    setMainImagePreview('');
+    setAdditionalImages([]);
+    setAdditionalImagePreviews([]);
+    setLength('');
+    setWidth('');
+    setHeight('');
+    setWeight('');
+    setDetectedCategory(null);
+    setHasSizes(false);
+    setSizes([]);
+    setError('');
+    setSuccess('');
+    setIsCreating(false);
+    clientLogger.log('✅ Форма очищена');
+  };
+
   // Загрузка задачи из URL параметра
   useEffect(() => {
     const taskIdFromUrl = searchParams?.get('taskId');
@@ -180,7 +209,7 @@ export default function SinglePageProductForm({
         }
       }
     } catch (err) {
-      console.error('Ошибка загрузки задачи:', err);
+      clientLogger.error('Ошибка загрузки задачи:', err);
     } finally {
       setIsLoadingTask(false);
     }
@@ -213,7 +242,7 @@ export default function SinglePageProductForm({
     if (savedState) {
       try {
         const state = JSON.parse(savedState);
-        console.log('📦 Восстановлено состояние формы из localStorage', state);
+        clientLogger.log('📦 Восстановлено состояние формы из localStorage', state);
         
         // Восстанавливаем только если это недавнее сохранение (не старше 1 часа)
         const savedTime = state.savedAt ? new Date(state.savedAt).getTime() : 0;
@@ -238,7 +267,7 @@ export default function SinglePageProductForm({
           alert('Обнаружено незавершенное создание товара. Данные восстановлены.');
         }
       } catch (e) {
-        console.warn('⚠️ Не удалось восстановить состояние формы', e);
+        clientLogger.warn('⚠️ Не удалось восстановить состояние формы', e);
       }
     }
   }, []);
@@ -289,23 +318,23 @@ export default function SinglePageProductForm({
       const response = await fetch('/api/user/cabinets');
       if (response.ok) {
         const result = await response.json();
-        console.log('📋 Получены кабинеты:', result);
+        clientLogger.log('📋 Получены кабинеты:', result);
         
         // API возвращает { success: true, data: { cabinets: [...] } }
         const cabinetsList = result.data?.cabinets || result.cabinets || [];
         setCabinets(cabinetsList);
         
-        console.log(`✅ Загружено кабинетов: ${cabinetsList.length}`);
+        clientLogger.log(`✅ Загружено кабинетов: ${cabinetsList.length}`);
         
         // Автоматически выбираем первый активный кабинет
         const firstActive = cabinetsList.find((c: Cabinet) => c.isActive);
         if (firstActive) {
           setSelectedCabinetId(firstActive.id);
-          console.log(`✅ Автовыбран кабинет: ${firstActive.name}`);
+          clientLogger.log(`✅ Автовыбран кабинет: ${firstActive.name}`);
         }
       }
     } catch (error) {
-      console.error('❌ Ошибка загрузки кабинетов:', error);
+      clientLogger.error('❌ Ошибка загрузки кабинетов:', error);
     } finally {
       setIsLoadingCabinets(false);
     }
@@ -326,10 +355,10 @@ export default function SinglePageProductForm({
       if (response.ok) {
         const result = await response.json();
         setAllCategories(result.categories || []);
-        console.log(`✅ Загружено ${result.categories?.length || 0} категорий`);
+        clientLogger.log(`✅ Загружено ${result.categories?.length || 0} категорий`);
       }
     } catch (error) {
-      console.error('❌ Ошибка загрузки категорий:', error);
+      clientLogger.error('❌ Ошибка загрузки категорий:', error);
     } finally {
       setIsLoadingCategories(false);
     }
@@ -351,7 +380,7 @@ export default function SinglePageProductForm({
         setCategoryHasSizeCharacteristic(hasSizeChar);
         
         if (hasSizeChar) {
-          console.log('✅ Категория требует указания размеров');
+          clientLogger.log('✅ Категория требует указания размеров');
           // Автоматически включаем режим размеров
           setHasSizes(true);
           // Добавляем первый размер по умолчанию
@@ -361,14 +390,14 @@ export default function SinglePageProductForm({
         }
       }
     } catch (error) {
-      console.error('Ошибка проверки характеристик категории:', error);
+      clientLogger.error('Ошибка проверки характеристик категории:', error);
     }
   };
 
   const detectCategory = async () => {
     // Не определяем если уже есть категория
     if (detectedCategory) {
-      console.log('ℹ️ Категория уже определена:', detectedCategory.name);
+      clientLogger.log('ℹ️ Категория уже определена:', detectedCategory.name);
       return;
     }
     
@@ -393,7 +422,7 @@ export default function SinglePageProductForm({
         formData.append(`additionalImage${index}`, file); // БЕЗ подчёркивания!
       });
       
-      console.log(`🔍 Определение категории с ${(mainImage ? 1 : 0) + additionalImages.length} фото`);
+      clientLogger.log(`🔍 Определение категории с ${(mainImage ? 1 : 0) + additionalImages.length} фото`);
       
       // Отправляем FormData (файлы будут загружены на сервер)
       const response = await fetch('/api/ai/detect-category', {
@@ -405,7 +434,7 @@ export default function SinglePageProductForm({
       
       if (result.success && result.detectedCategory) {
         setDetectedCategory(result.detectedCategory);
-        console.log('✅ Категория определена:', result.detectedCategory.name);
+        clientLogger.log('✅ Категория определена:', result.detectedCategory.name);
         
         // Проверяем, есть ли в категории характеристика "Размер"
         await checkCategoryForSizeCharacteristic(result.detectedCategory.id);
@@ -413,7 +442,7 @@ export default function SinglePageProductForm({
         setCategoryError(result.error || 'Не удалось определить категорию');
       }
     } catch (error) {
-      console.error('❌ Ошибка определения категории:', error);
+      clientLogger.error('❌ Ошибка определения категории:', error);
       setCategoryError('Ошибка определения категории');
     } finally {
       setIsCategoryDetecting(false);
@@ -421,6 +450,13 @@ export default function SinglePageProductForm({
   };
 
   const handleMainImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Проверяем наличие названия товара
+    if (!productName || productName.trim() === '') {
+      setError('Сначала введите название товара');
+      e.target.value = ''; // Сбрасываем выбор файла
+      return;
+    }
+    
     const file = e.target.files?.[0];
     if (file) {
       setMainImage(file);
@@ -430,7 +466,7 @@ export default function SinglePageProductForm({
         
         // Автоматически определяем категорию если есть название и еще не определена
         if (productName && !detectedCategory && !isCategoryDetecting) {
-          console.log('🎯 Автоматическое определение категории...');
+          clientLogger.log('🎯 Автоматическое определение категории...');
           // Небольшая задержка чтобы state обновился
           setTimeout(() => detectCategory(), 100);
         }
@@ -440,6 +476,13 @@ export default function SinglePageProductForm({
   };
 
   const handleAdditionalImagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Проверяем наличие названия товара
+    if (!productName || productName.trim() === '') {
+      setError('Сначала введите название товара');
+      e.target.value = ''; // Сбрасываем выбор файлов
+      return;
+    }
+    
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     
@@ -459,7 +502,7 @@ export default function SinglePageProductForm({
     
     // 🔒 ЗАЩИТА: Предотвращаем множественные отправки
     if (isCreating) {
-      console.warn('⚠️ Форма уже отправляется, игнорируем повторный submit');
+      clientLogger.warn('⚠️ Форма уже отправляется, игнорируем повторный submit');
       return;
     }
     
@@ -550,7 +593,7 @@ export default function SinglePageProductForm({
       return;
     }
     
-    console.log('🚀 [FORM] Начало отправки формы:', new Date().toISOString());
+    clientLogger.log('🚀 [FORM] Начало отправки формы:', new Date().toISOString());
     setIsCreating(true);
     setError('');
     setSuccess('');
@@ -564,9 +607,6 @@ export default function SinglePageProductForm({
     }
     
     setCurrentTaskId(taskId);
-    
-    // ✅ Сразу перенаправляем на страницу "В работе"
-    router.push(`/?tab=in-progress`);
     
     // 🔥 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Создаем FormData для фоновой обработки
     const formDataToSend = new FormData();
@@ -614,7 +654,7 @@ export default function SinglePageProductForm({
       formDataToSend.append(`additionalImage${index}`, file); // БЕЗ подчёркивания!
     });
     
-    console.log('📤 Отправка FormData с файлами:', {
+    clientLogger.log('📤 Отправка FormData с файлами:', {
       name: productName,
       mainImage: mainImage?.name,
       additionalImages: additionalImages.length,
@@ -622,54 +662,29 @@ export default function SinglePageProductForm({
       taskId
     });
     
-    // 🔥 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Запускаем фоновую обработку и сразу разблокируем форму
-    // Не ждем завершения - процесс идет в фоне
+    // 🔥 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Запускаем фоновую обработку
     const productsUrl = new URL('/api/products', window.location.origin);
     if (selectedCabinetId) productsUrl.searchParams.set('cabinetId', selectedCabinetId);
+    
+    // Запускаем обработку в фоне (не ждем завершения)
     fetch(productsUrl.toString(), {
       method: 'POST',
       body: formDataToSend
     }).then(async (response) => {
       const result = await response.json();
       
-      console.log('📦 Фоновая обработка завершена:', result);
+      clientLogger.log('📦 Фоновая обработка завершена:', result);
       
       if (result.success || result.productId) {
-        console.log('✅ Товар создан в фоне:', result.productId);
-        setCreatedProductId(result.productId);
-        
-        // Сохраняем все характеристики категории
-        setAllCategoryCharacteristics(result.characteristics || []);
-        
-        // API возвращает данные в разных полях, сохраняем всё
-        setAiResults({
-          characteristics: result.characteristics || [],
-          aiCharacteristics: result.aiCharacteristics || {},
-          seoTitle: result.generatedName || result.aiPreview?.seoTitle,
-          seoDescription: result.seoDescription || result.aiPreview?.seoDescription,
-          qualityMetrics: result.aiCharacteristics?.qualityMetrics || result.aiPreview?.qualityMetrics,
-          analysisReport: result.aiCharacteristics?.analysisReport || result.aiPreview?.analysisReport,
-          generatedName: result.generatedName,
-          confidence: result.aiCharacteristics?.confidence || 0,
-          warnings: result.aiCharacteristics?.warnings || [],
-          recommendations: result.aiCharacteristics?.recommendations || []
-        });
+        clientLogger.log('✅ Товар создан в фоне:', result.productId);
         
         // ✅ Завершаем задачу - AI анализ завершен, товар создан
         if (taskId) {
           await completeTask(taskId, result.productId);
-          setCurrentTaskId(null);
-          console.log('✅ Задача завершена: AI анализ завершен, товар создан');
+          clientLogger.log('✅ Задача завершена: AI анализ завершен, товар создан');
         }
-        
-        // 🔄 Перенаправляем на вкладку "В работе" для просмотра результатов
-        console.log('🔄 Перенаправление на вкладку "В работе"...');
-        router.push('/?tab=in-progress');
-        
-        setShowResults(true);
-        setSuccess('Товар успешно создан!');
       } else {
-        console.error('❌ Ошибка фоновой обработки:', result.error);
+        clientLogger.error('❌ Ошибка фоновой обработки:', result.error);
         
         // Отмечаем задачу как ошибку
         if (taskId) {
@@ -677,7 +692,7 @@ export default function SinglePageProductForm({
         }
       }
     }).catch(async (error) => {
-      console.error('❌ Ошибка фоновой обработки:', error);
+      clientLogger.error('❌ Ошибка фоновой обработки:', error);
       
       // Отмечаем задачу как ошибку
       if (taskId) {
@@ -685,29 +700,31 @@ export default function SinglePageProductForm({
       }
     });
     
-    // ✅ Не очищаем форму и не разблокируем - пользователь уже на странице отслеживания
-    // Форма останется в состоянии загрузки до редиректа
+    // ✅ Очищаем форму и перенаправляем на страницу "В работе"
+    clientLogger.log('🔄 Очистка формы и редирект на страницу "В работе"...');
+    resetForm();
+    router.push('/?tab=in-progress');
   };
 
   // Обработчики для Step4Results
   const handleUpdateProductField = async (field: string, value: string) => {
     // TODO: Реализовать обновление поля товара
-    console.log('Обновление поля:', field, value);
+    clientLogger.log('Обновление поля:', field, value);
   };
 
   const handleUpdateCharacteristic = async (characteristicId: number, newValue: any) => {
     // TODO: Реализовать обновление характеристики
-    console.log('Обновление характеристики:', characteristicId, newValue);
+    clientLogger.log('Обновление характеристики:', characteristicId, newValue);
   };
 
   const handleDeleteCharacteristic = async (characteristicId: number) => {
     // TODO: Реализовать удаление характеристики
-    console.log('Удаление характеристики:', characteristicId);
+    clientLogger.log('Удаление характеристики:', characteristicId);
   };
 
   const handleAddNewCharacteristic = async (characteristicId: number, value: any) => {
     // TODO: Реализовать добавление характеристики
-    console.log('Добавление характеристики:', characteristicId, value);
+    clientLogger.log('Добавление характеристики:', characteristicId, value);
   };
 
   const handleToggleEditCharacteristic = (characteristicId: number) => {
@@ -735,15 +752,15 @@ export default function SinglePageProductForm({
         currentStage: 'Публикация на Wildberries',
         productId: createdProductId
       });
-      console.log('📤 Обновлена задача для публикации:', taskId);
+      clientLogger.log('📤 Обновлена задача для публикации:', taskId);
     }
     
     try {
-      console.log('🚀 Публикация товара на WB...');
-      console.log('🔍 DEBUG aiResults:', aiResults);
-      console.log('🔍 DEBUG aiResults.aiCharacteristics:', aiResults?.aiCharacteristics);
-      console.log('🔍 DEBUG aiResults.characteristics:', aiResults?.characteristics);
-      console.log('🔍 DEBUG allCategoryCharacteristics:', allCategoryCharacteristics);
+      clientLogger.log('🚀 Публикация товара на WB...');
+      clientLogger.log('🔍 DEBUG aiResults:', aiResults);
+      clientLogger.log('🔍 DEBUG aiResults.aiCharacteristics:', aiResults?.aiCharacteristics);
+      clientLogger.log('🔍 DEBUG aiResults.characteristics:', aiResults?.characteristics);
+      clientLogger.log('🔍 DEBUG allCategoryCharacteristics:', allCategoryCharacteristics);
       
       // Получаем характеристики из allCategoryCharacteristics (это то что показывается в Step4Results)
       // Берем только заполненные характеристики
@@ -761,7 +778,7 @@ export default function SinglePageProductForm({
           value: char.value
         }));
       
-      console.log('📤 Отправка данных для публикации:', {
+      clientLogger.log('📤 Отправка данных для публикации:', {
         characteristics: characteristicsToSend.length,
         seoTitle: aiResults?.seoTitle || aiResults?.generatedName,
         hasDescription: !!(aiResults?.seoDescription),
@@ -789,7 +806,7 @@ export default function SinglePageProductForm({
         if (taskId) {
           await completeTask(taskId, createdProductId);
           setCurrentTaskId(null); // Очищаем ID задачи
-          console.log('✅ Задача завершена: товар опубликован на WB');
+          clientLogger.log('✅ Задача завершена: товар опубликован на WB');
         }
       } else {
         setError(result.error || 'Ошибка публикации товара');
@@ -800,7 +817,7 @@ export default function SinglePageProductForm({
         }
       }
     } catch (error) {
-      console.error('❌ Ошибка публикации:', error);
+      clientLogger.error('❌ Ошибка публикации:', error);
       const errorMessage = 'Ошибка публикации товара';
       setError(errorMessage);
       
@@ -815,12 +832,12 @@ export default function SinglePageProductForm({
 
   const handleSaveOnly = async () => {
     // TODO: Сохранить изменения без публикации
-    console.log('Сохранение без публикации');
+    clientLogger.log('Сохранение без публикации');
   };
 
   const handleCreateInfographic = async () => {
     // TODO: Создать инфографику
-    console.log('Создание инфографики');
+    clientLogger.log('Создание инфографики');
   };
 
   const handleClearForm = () => {
@@ -854,7 +871,7 @@ export default function SinglePageProductForm({
   };
 
   const handleLoadProductCharacteristics = (productId: string) => {
-    console.log('Загрузка характеристик товара:', productId);
+    clientLogger.log('Загрузка характеристик товара:', productId);
   };
 
   // Скролл вверх при показе результатов
@@ -867,15 +884,37 @@ export default function SinglePageProductForm({
   // Если отслеживаем задачу и она активна - показываем загрузку
   if (trackingTask && trackingTask.status !== 'COMPLETED' && trackingTask.status !== 'ERROR') {
     return (
-      <div className="relative w-full flex flex-col items-center justify-start">
-        <div className="z-10 w-full max-w-4xl mx-auto flex flex-col items-center">
-          <div className="w-full liquid-glass rounded-2xl p-12 shadow-inner-soft text-center">
-            <div className="mb-6">
-              <Loader2 className="w-16 h-16 animate-spin text-blue-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">
+      <div className="relative w-full min-h-screen flex flex-col items-center justify-center overflow-hidden bg-gradient-to-br from-purple-50 via-white to-blue-50">
+        {/* Анимированные фоновые элементы */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {/* Круги */}
+          <div className="absolute top-10 left-10 w-32 h-32 bg-purple-200/30 rounded-full blur-xl animate-float" style={{animationDelay: '0s'}} />
+          <div className="absolute top-40 right-20 w-40 h-40 bg-blue-200/30 rounded-full blur-xl animate-float" style={{animationDelay: '1s'}} />
+          <div className="absolute bottom-20 left-1/4 w-36 h-36 bg-pink-200/30 rounded-full blur-xl animate-float" style={{animationDelay: '2s'}} />
+          <div className="absolute bottom-40 right-1/3 w-28 h-28 bg-indigo-200/30 rounded-full blur-xl animate-float" style={{animationDelay: '1.5s'}} />
+          
+          {/* Квадраты */}
+          <div className="absolute top-1/4 left-1/3 w-20 h-20 bg-purple-300/20 rounded-lg blur-lg animate-spin-slow" />
+          <div className="absolute bottom-1/4 right-1/4 w-24 h-24 bg-blue-300/20 rounded-lg blur-lg animate-spin-slow" style={{animationDelay: '3s'}} />
+        </div>
+
+        {/* Основной контент */}
+        <div className="relative z-10 w-full max-w-md mx-auto px-4 sm:px-6">
+          <div className="bg-white/80 backdrop-blur-xl rounded-3xl p-6 sm:p-8 shadow-2xl border border-purple-100 animate-in fade-in zoom-in duration-500">
+            {/* Анимированный лоадер */}
+            <div className="relative mb-6">
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-24 h-24 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-2xl opacity-50 animate-pulse" />
+              </div>
+              <Loader2 className="relative w-16 h-16 sm:w-20 sm:h-20 animate-spin text-purple-600 mx-auto" />
+            </div>
+
+            {/* Текст */}
+            <div className="text-center mb-6">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-800 mb-2 line-clamp-2">
                 {trackingTask.productName}
               </h2>
-              <p className="text-gray-600">
+              <p className="text-sm sm:text-base text-gray-600 animate-pulse">
                 {trackingTask.currentStage || 'Создание товара...'}
               </p>
             </div>
@@ -883,12 +922,12 @@ export default function SinglePageProductForm({
             {/* Прогресс бар */}
             <div className="mb-6">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium text-gray-700">Прогресс</span>
-                <span className="text-sm font-semibold text-gray-900">{trackingTask.progress}%</span>
+                <span className="text-xs sm:text-sm font-medium text-gray-600">Прогресс</span>
+                <span className="text-xs sm:text-sm font-bold text-purple-600">{trackingTask.progress}%</span>
               </div>
-              <div className="relative w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+              <div className="relative w-full bg-gray-200 rounded-full h-2.5 sm:h-3 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-full transition-all duration-700"
+                  className="h-full bg-gradient-to-r from-purple-500 via-blue-500 to-purple-500 rounded-full transition-all duration-700 animate-gradient-x"
                   style={{ width: `${trackingTask.progress}%` }}
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent animate-shimmer" />
@@ -896,85 +935,48 @@ export default function SinglePageProductForm({
               </div>
             </div>
 
-            <p className="text-sm text-gray-500 mb-6">
-              Товар создается примерно 2 минуты. Вы можете закрыть эту страницу - мы уведомим вас когда товар будет готов.
+            {/* Подсказка */}
+            <p className="text-xs sm:text-sm text-gray-500 text-center mb-6">
+              Товар создается ~2 мин. Можете закрыть страницу
             </p>
 
+            {/* Кнопка */}
             <button
               onClick={handleClearForm}
-              className="px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-all transform hover:scale-105 flex items-center gap-2 mx-auto"
+              className="w-full px-4 py-2.5 sm:py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-semibold rounded-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-purple-500/30 touch-manipulation"
             >
-              <Plus className="w-5 h-5" />
-              <span>Создать новый товар</span>
+              <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="text-sm sm:text-base">Создать новый товар</span>
             </button>
           </div>
         </div>
+
       </div>
     );
   }
 
-  // Если показываем результаты - используем Step4Results
-  if (showResults && createdProductId && aiResults) {
-    return (
-      <div>
-        {/* Сообщения об ошибках/успехе над результатами */}
-        {error && (
-          <div className="max-w-6xl mx-auto mb-4 p-4 bg-red-900/50 border border-red-500 rounded text-red-200">
-            ❌ {error}
-          </div>
-        )}
-        
-        {success && !error && (
-          <div className="max-w-6xl mx-auto mb-4 p-4 bg-green-900/50 border border-green-500 rounded text-green-200">
-            ✅ {success}
-          </div>
-        )}
-        
-        <Step4Results
-          createdProductId={createdProductId}
-          aiResponse={aiResults}
-          aiCharacteristics={aiResults.aiCharacteristics?.characteristics || []}
-          allCategoryCharacteristics={allCategoryCharacteristics}
-          isLoadingCharacteristics={false}
-          editingCharacteristics={editingCharacteristics}
-          onUpdateProductField={handleUpdateProductField}
-          onUpdateCharacteristic={handleUpdateCharacteristic}
-          onDeleteCharacteristic={handleDeleteCharacteristic}
-          onAddNewCharacteristic={handleAddNewCharacteristic}
-          onToggleEditCharacteristic={handleToggleEditCharacteristic}
-          onPublish={handlePublish}
-          onSaveOnly={handleSaveOnly}
-          onCreateInfographic={handleCreateInfographic}
-          onClearForm={handleClearForm}
-          onLoadProductCharacteristics={handleLoadProductCharacteristics}
-          hasPendingData={true}
-          isPublished={false}
-          isPublishing={isCreating}
-          dimensions={{
-            length,
-            width,
-            height,
-            weight
-          }}
-        />
-      </div>
-    );
-  }
+  // Если товар создан - редиректим на страницу "В работе"
+  useEffect(() => {
+    if (showResults && createdProductId) {
+      clientLogger.log('✅ Товар создан, редирект на страницу "В работе"');
+      router.push('/?tab=in-progress');
+    }
+  }, [showResults, createdProductId, router]);
 
   return (
-    <div className="relative w-full flex flex-col items-center justify-start px-4 sm:px-6">
+    <div className="relative w-full flex flex-col items-center justify-start px-3 sm:px-6">
       <div className="z-10 w-full max-w-6xl mx-auto flex flex-col items-center">
-        <main className="w-full liquid-glass rounded-2xl p-4 md:p-8 shadow-inner-soft">
-          <div className="space-y-4 md:space-y-6">
+        <main className="w-full liquid-glass rounded-2xl p-3 sm:p-6 md:p-8 shadow-inner-soft">
+          <div className="space-y-3 sm:space-y-4 md:space-y-6">
             <div className="text-center">
-              <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Создание нового товара</h1>
-              <p className="text-text-subtle mt-2 text-sm md:text-base">Заполните информацию о товаре для Wildberries</p>
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-800">Создание нового товара</h1>
+              <p className="text-text-subtle mt-1 sm:mt-2 text-xs sm:text-sm md:text-base">Заполните информацию о товаре для Wildberries</p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 md:space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4 md:space-y-6">
           {/* Название товара */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-text-subtle" htmlFor="product-name">
+          <div className="space-y-1.5 sm:space-y-2">
+            <label className="block text-xs sm:text-sm font-medium text-gray-700" htmlFor="product-name">
               Название товара *
             </label>
             <input
@@ -982,22 +984,32 @@ export default function SinglePageProductForm({
               type="text"
               value={productName}
               onChange={(e) => setProductName(e.target.value)}
-              className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main placeholder-text-subtle focus:ring-2 focus:ring-primary-hover transition-all duration-300"
-              placeholder="например, Смарт-часы с AI-ассистентом"
+              className="w-full liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2.5 sm:p-3 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 caret-black"
+              placeholder="Смарт-часы с AI-ассистентом"
               required
+              style={{caretColor: 'black'}}
             />
           </div>
 
           {/* Фото рядом */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
             {/* Главное фото */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle">
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700">
                 Главное фото *
               </label>
               {mainImagePreview ? (
-                <div className="relative group w-full h-48">
-                  <img src={mainImagePreview} alt="Preview" className="w-full h-full object-cover rounded-lg" />
+                <div className="relative group w-full h-40 sm:h-48">
+                  <img 
+                    src={mainImagePreview} 
+                    alt="Preview" 
+                    className="w-full h-full object-cover rounded-lg"
+                    loading="lazy"
+                    decoding="async"
+                    onError={(e) => {
+                      e.currentTarget.src = '/placeholder.png';
+                    }}
+                  />
                   <button
                     type="button"
                     onClick={() => {
@@ -1010,12 +1022,30 @@ export default function SinglePageProductForm({
                   </button>
                 </div>
               ) : (
-                <div className="flex items-center justify-center w-full h-48 rounded-lg liquid-glass-input shadow-inner-soft">
-                  <label className="flex flex-col items-center justify-center w-full h-full border-2 border-dashed border-gray-300/50 rounded-lg cursor-pointer hover:border-primary/50 transition-colors" htmlFor="main-photo">
-                    <div className="flex flex-col items-center justify-center text-center">
-                      <CloudUpload className="w-10 h-10 text-text-subtle mb-2" />
-                      <p className="mb-2 text-sm text-text-subtle"><span className="font-semibold text-primary">Нажмите для загрузки</span></p>
-                      <p className="text-xs text-text-subtle">PNG, JPG, WEBP</p>
+                <div className="flex items-center justify-center w-full h-40 sm:h-48 rounded-lg liquid-glass-input shadow-inner-soft">
+                  <label 
+                    className={`flex flex-col items-center justify-center w-full h-full border-2 border-dashed rounded-lg transition-colors ${
+                      !productName || productName.trim() === ''
+                        ? 'border-gray-300 cursor-not-allowed opacity-50'
+                        : 'border-purple-300 cursor-pointer hover:border-purple-500 active:border-purple-600'
+                    }`}
+                    htmlFor="main-photo"
+                    title={!productName || productName.trim() === '' ? 'Сначала введите название товара' : ''}
+                  >
+                    <div className="flex flex-col items-center justify-center text-center px-2">
+                      <CloudUpload className={`w-8 h-8 sm:w-10 sm:h-10 mb-2 ${
+                        !productName || productName.trim() === '' ? 'text-gray-400' : 'text-purple-500'
+                      }`} />
+                      <p className="mb-1 text-xs sm:text-sm text-gray-700">
+                        <span className={`font-semibold ${
+                          !productName || productName.trim() === '' ? 'text-gray-500' : 'text-purple-600'
+                        }`}>
+                          {!productName || productName.trim() === '' ? 'Введите название товара' : 'Нажмите для загрузки'}
+                        </span>
+                      </p>
+                      {productName && productName.trim() !== '' && (
+                        <p className="text-xs text-gray-500">PNG, JPG, WEBP</p>
+                      )}
                     </div>
                     <input
                       id="main-photo"
@@ -1024,6 +1054,7 @@ export default function SinglePageProductForm({
                       onChange={handleMainImageChange}
                       className="hidden"
                       required
+                      disabled={!productName || productName.trim() === ''}
                     />
                   </label>
                 </div>
@@ -1031,59 +1062,82 @@ export default function SinglePageProductForm({
             </div>
 
             {/* Дополнительные фото */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle">
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700">
                 Дополнительные фото
               </label>
-              <div className="flex items-center justify-center w-full h-48 rounded-lg liquid-glass-input shadow-inner-soft">
-                <div className="w-full h-full p-3">
-                  <div className="flex flex-wrap gap-2 h-full content-start">
-                    {additionalImagePreviews.map((preview, index) => (
-                      <div key={index} className="relative group w-20 h-20">
-                        <img src={preview} alt={`Preview ${index}`} className="w-full h-full object-cover rounded-lg" />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAdditionalImages(prev => prev.filter((_, i) => i !== index));
-                            setAdditionalImagePreviews(prev => prev.filter((_, i) => i !== index));
-                          }}
-                          className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 shadow-lg"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
-                    <label className="flex flex-col items-center justify-center w-20 h-20 border-2 border-dashed border-gray-300/50 rounded-lg cursor-pointer hover:border-primary/50 transition-colors" htmlFor="additional-photos">
-                      <ImageIcon className="w-6 h-6 text-text-subtle mb-1" />
-                      <p className="text-xs text-text-subtle font-semibold text-primary text-center">Загрузить еще</p>
-                      <input
-                        id="additional-photos"
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={handleAdditionalImagesChange}
-                        className="hidden"
+              <div className="w-full h-40 sm:h-48 rounded-lg liquid-glass-input shadow-inner-soft p-3 overflow-auto">
+                <div className="flex gap-2 min-w-max">
+                  {additionalImagePreviews.map((preview, index) => (
+                    <div key={index} className="relative group w-32 h-32 flex-shrink-0">
+                      <img 
+                        src={preview} 
+                        alt={`Preview ${index}`} 
+                        className="w-full h-full object-cover rounded-lg"
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                          e.currentTarget.src = '/placeholder.png';
+                        }}
                       />
-                    </label>
-                  </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdditionalImages(prev => prev.filter((_, i) => i !== index));
+                          setAdditionalImagePreviews(prev => prev.filter((_, i) => i !== index));
+                        }}
+                        className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 shadow-lg"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <label 
+                    className={`flex flex-col items-center justify-center w-32 h-32 flex-shrink-0 border-2 border-dashed rounded-lg transition-colors ${
+                      !productName || productName.trim() === ''
+                        ? 'border-gray-300 cursor-not-allowed opacity-50'
+                        : 'border-purple-300 cursor-pointer hover:border-purple-500 active:border-purple-600'
+                    }`}
+                    htmlFor="additional-photos"
+                    title={!productName || productName.trim() === '' ? 'Сначала введите название товара' : ''}
+                  >
+                    <ImageIcon className={`w-8 h-8 mb-1 ${
+                      !productName || productName.trim() === '' ? 'text-gray-400' : 'text-purple-500'
+                    }`} />
+                    <p className={`text-xs font-semibold text-center px-2 ${
+                      !productName || productName.trim() === '' ? 'text-gray-500' : 'text-gray-700'
+                    }`}>
+                      {!productName || productName.trim() === '' ? 'Введите название' : 'Загрузить'}
+                    </p>
+                    <input
+                      id="additional-photos"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleAdditionalImagesChange}
+                      className="hidden"
+                      disabled={!productName || productName.trim() === ''}
+                    />
+                  </label>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Кабинет */}
-          <div className="space-y-2">
-            <label className="flex items-center text-sm font-medium text-text-subtle" htmlFor="publication-cabinet">
-              <Store className="w-4 h-4 mr-2" />
+          <div className="space-y-1.5 sm:space-y-2">
+            <label className="flex items-center text-xs sm:text-sm font-medium text-gray-700" htmlFor="publication-cabinet">
+              <Store className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 text-purple-600" />
               Кабинет для публикации *
             </label>
             <select
               id="publication-cabinet"
               value={selectedCabinetId || ''}
               onChange={(e) => setSelectedCabinetId(e.target.value)}
-              className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main focus:ring-2 focus:ring-primary-hover transition-all duration-300"
+              className="w-full liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2.5 sm:p-3 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 caret-black"
               required
               disabled={isLoadingCabinets}
+              style={{caretColor: 'black'}}
             >
               <option value="">
                 {isLoadingCabinets ? 'Загрузка...' : cabinets.length > 0 ? 'Выберите кабинет' : 'Нет доступных кабинетов'}
@@ -1097,108 +1151,168 @@ export default function SinglePageProductForm({
           </div>
 
           {/* Комплектация товара - ОБЯЗАТЕЛЬНОЕ ПОЛЕ */}
-          <div className="space-y-2">
-            <label className="flex items-center text-sm font-medium text-gray-900" htmlFor="packaging">
-              <Package className="w-4 h-4 mr-2 text-gray-600" />
+          <div className="space-y-1.5 sm:space-y-2">
+            <label className="flex items-center text-xs sm:text-sm font-medium text-gray-700" htmlFor="packaging">
+              <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 text-purple-600" />
               Комплектация товара *
             </label>
             <textarea
               id="packaging"
               value={packageContents}
               onChange={(e) => setPackageContents(e.target.value)}
-              className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-gray-400 focus:ring-2 focus:ring-gray-200 outline-none transition-all resize-none"
+              className="w-full px-3 py-2 sm:px-4 sm:py-2.5 border-2 border-purple-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none transition-all resize-none text-gray-900 placeholder-gray-400 text-sm caret-black"
               rows={2}
               placeholder="Товар - 1 шт., упаковка - 1 шт."
               required
+              style={{caretColor: 'black'}}
             />
           </div>
 
           {/* Комментарий */}
-          <div className="space-y-2">
-            <label className="flex items-center text-sm font-medium text-gray-900" htmlFor="comment">
-              <MessageSquare className="w-4 h-4 mr-2 text-purple-600" />
-              Комментарий
+          <div className="space-y-1.5 sm:space-y-2">
+            <label className="flex items-center text-xs sm:text-sm font-medium text-gray-700" htmlFor="comment">
+              <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 text-purple-600" />
+              Комментарий (опционально)
             </label>
             <textarea
               id="comment"
               value={imageComments}
               onChange={(e) => setImageComments(e.target.value)}
-              className="w-full px-4 py-2 border-2 border-purple-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none transition-all resize-none"
+              className="w-full px-3 py-2 sm:px-4 sm:py-2.5 border-2 border-purple-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none transition-all resize-none text-gray-900 placeholder-gray-400 text-sm caret-black"
               rows={3}
-              placeholder="Добавьте внутренний комментарий, например, 'Партия от 24.07.24'"
+              placeholder="Основная фича товара или ссылка на аналог для анализа. Пример: 'IP68' или 'https://wb.ru/catalog/12345'"
+              style={{caretColor: 'black'}}
             />
           </div>
 
           {/* Индикатор определения категории */}
           {(isCategoryDetecting || detectedCategory || categoryError) && (
-            <div className="space-y-2">
-              <div className="liquid-glass rounded-lg p-4">
+            <div className="space-y-1.5 sm:space-y-2">
+              <div className="liquid-glass rounded-lg p-3 sm:p-4">
                 {isCategoryDetecting && (
-                  <div className="flex items-center gap-3 text-blue-600">
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                  <div className="flex items-center gap-2 sm:gap-3 text-blue-600">
+                    <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
                     <div>
-                      <p className="font-semibold">Определение категории...</p>
-                      <p className="text-xs text-text-subtle">AI анализирует изображения и название товара</p>
+                      <p className="text-sm sm:text-base font-semibold">Определение категории...</p>
+                      <p className="text-xs text-gray-500">AI анализирует изображения</p>
                     </div>
                   </div>
                 )}
                 {!isCategoryDetecting && detectedCategory && (
-                  <div className="space-y-3 animate-in fade-in duration-500">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 text-green-600">
-                        <CheckCircle className="w-5 h-5" />
-                        <div>
-                          <p className="font-semibold">✅ Категория определена</p>
-                          <p className="text-sm text-text-main">{detectedCategory.parentName} → {detectedCategory.name}</p>
+                  <div className="space-y-2 sm:space-y-3 animate-in fade-in duration-500">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+                      <div className="flex items-start sm:items-center gap-2 sm:gap-3 text-green-600">
+                        <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0 mt-0.5 sm:mt-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm sm:text-base font-semibold">✅ Категория определена</p>
+                          <p className="text-xs sm:text-sm text-gray-700 truncate">{detectedCategory.parentName} → {detectedCategory.name}</p>
                         </div>
                       </div>
                       <button
                         type="button"
                         onClick={() => {
-                          setShowCategorySelector(!showCategorySelector);
-                          if (!showCategorySelector && allCategories.length === 0) {
+                          const newState = !showCategorySelector;
+                          setShowCategorySelector(newState);
+                          // Загружаем категории при открытии селектора
+                          if (newState && allCategories.length === 0) {
                             loadAllCategories();
                           }
                         }}
-                        className="px-3 py-1 text-xs text-text-subtle hover:text-text-main border border-border-subtle rounded-lg hover:bg-bg-subtle transition-colors"
+                        className="self-start sm:self-auto px-3 py-1.5 text-xs sm:text-sm text-gray-600 hover:text-gray-900 border-2 border-gray-300 rounded-lg hover:bg-gray-50 active:bg-gray-100 transition-colors touch-manipulation flex-shrink-0"
                       >
                         {showCategorySelector ? 'Скрыть' : 'Изменить'}
                       </button>
                     </div>
                     
                     {showCategorySelector && (
-                      <div className="bg-white/50 rounded-lg p-4 border border-amber-200 space-y-3">
-                        <p className="text-sm font-semibold text-gray-700">Выберите категорию вручную:</p>
+                      <div className="bg-white/50 rounded-lg p-3 sm:p-4 border border-purple-200 space-y-2 sm:space-y-3">
+                        <p className="text-xs sm:text-sm font-semibold text-gray-700">Выберите категорию вручную:</p>
                         {isLoadingCategories ? (
                           <div className="flex items-center gap-2 text-blue-600">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span className="text-sm">Загрузка категорий...</span>
+                            <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
+                            <span className="text-xs sm:text-sm">Загрузка категорий...</span>
                           </div>
                         ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto">
-                            {allCategories.map((cat: any) => (
+                          <>
+                            {/* Поле поиска */}
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={categorySearchTerm}
+                                onChange={(e) => setCategorySearchTerm(e.target.value)}
+                                placeholder="Поиск категории..."
+                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                              />
+                              {categorySearchTerm && (
+                                <button
+                                  onClick={() => setCategorySearchTerm('')}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                            
+                            {/* Счетчик найденных категорий */}
+                            {(() => {
+                              const filtered = allCategories.filter((cat: any) => {
+                                if (!categorySearchTerm) return true;
+                                const search = categorySearchTerm.toLowerCase();
+                                return cat.name.toLowerCase().includes(search) || 
+                                       cat.parentName?.toLowerCase().includes(search);
+                              });
+                              const shown = Math.min(filtered.length, 100);
+                              return (
+                                <p className="text-xs text-gray-500">
+                                  {categorySearchTerm ? (
+                                    <>Найдено: {filtered.length} {shown < filtered.length && `(показано ${shown})`}</>
+                                  ) : (
+                                    <>Всего категорий: {allCategories.length} (показано {shown})</>
+                                  )}
+                                </p>
+                              );
+                            })()}
+                            
+                            {/* Список категорий */}
+                            <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto">
+                              {allCategories
+                                .filter((cat: any) => {
+                                  if (!categorySearchTerm) return true;
+                                  const search = categorySearchTerm.toLowerCase();
+                                  return cat.name.toLowerCase().includes(search) || 
+                                         cat.parentName?.toLowerCase().includes(search);
+                                })
+                                .slice(0, 100) // Показываем максимум 100 для производительности
+                                .map((cat: any) => (
                               <button
                                 key={cat.id}
                                 type="button"
                                 onClick={() => {
+                                  // Устанавливаем категорию
                                   setDetectedCategory(cat);
                                   setShowCategorySelector(false);
+                                  setCategorySearchTerm(''); // Очищаем поиск
+                                  
+                                  // Проверяем характеристику "Размер"
                                   checkCategoryForSizeCharacteristic(cat.id);
-                                  console.log(`✅ Категория выбрана вручную: ${cat.name}`);
+                                  
+                                  clientLogger.log(`✅ Категория выбрана вручную: ${cat.name} (ID: ${cat.id})`);
+                                  clientLogger.log(`🎯 Категория будет передана агентам при создании товара`);
                                 }}
-                                className={`text-left p-3 rounded-lg border-2 transition-all ${
+                                className={`text-left p-2.5 sm:p-3 rounded-lg border-2 transition-all touch-manipulation ${
                                   detectedCategory?.id === cat.id
                                     ? 'border-green-500 bg-green-50'
-                                    : 'border-gray-200 hover:border-green-300 bg-white'
+                                    : 'border-gray-300 hover:border-purple-400 active:border-purple-500 bg-white'
                                 }`}
                               >
-                                <p className="font-medium text-sm text-gray-900">{cat.name}</p>
+                                <p className="font-medium text-xs sm:text-sm text-gray-900">{cat.name}</p>
                                 {cat.parentName && (
-                                  <p className="text-xs text-gray-500">{cat.parentName}</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">{cat.parentName}</p>
                                 )}
                               </button>
-                            ))}
-                          </div>
+                                ))}
+                            </div>
+                          </>
                         )}
                       </div>
                     )}
@@ -1218,12 +1332,13 @@ export default function SinglePageProductForm({
           )}
 
           {/* Размеры */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle" htmlFor="length">Длина (см)</label>
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 md:gap-4">
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700" htmlFor="length">Длина (см)</label>
               <input
                 id="length"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.1"
                 value={length}
@@ -1238,15 +1353,17 @@ export default function SinglePageProductForm({
                     e.preventDefault();
                   }
                 }}
-                className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main placeholder-text-subtle focus:ring-2 focus:ring-primary-hover transition-all duration-300"
+                className="w-full liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2 sm:p-2.5 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 text-sm caret-black"
                 placeholder="20"
+                style={{caretColor: 'black'}}
               />
             </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle" htmlFor="width">Ширина (см)</label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700" htmlFor="width">Ширина (см)</label>
               <input
                 id="width"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.1"
                 value={width}
@@ -1261,15 +1378,17 @@ export default function SinglePageProductForm({
                     e.preventDefault();
                   }
                 }}
-                className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main placeholder-text-subtle focus:ring-2 focus:ring-primary-hover transition-all duration-300"
+                className="w-full liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2 sm:p-2.5 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 text-sm caret-black"
                 placeholder="15"
+                style={{caretColor: 'black'}}
               />
             </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle" htmlFor="height">Высота (см)</label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700" htmlFor="height">Высота (см)</label>
               <input
                 id="height"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.1"
                 value={height}
@@ -1284,15 +1403,17 @@ export default function SinglePageProductForm({
                     e.preventDefault();
                   }
                 }}
-                className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main placeholder-text-subtle focus:ring-2 focus:ring-primary-hover transition-all duration-300"
+                className="w-full liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2 sm:p-2.5 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 text-sm caret-black"
                 placeholder="5"
+                style={{caretColor: 'black'}}
               />
             </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle" htmlFor="weight">Вес (кг)</label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700" htmlFor="weight">Вес (кг)</label>
               <input
                 id="weight"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={weight}
@@ -1307,20 +1428,22 @@ export default function SinglePageProductForm({
                     e.preventDefault();
                   }
                 }}
-                className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main placeholder-text-subtle focus:ring-2 focus:ring-primary-hover transition-all duration-300"
+                className="w-full liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2 sm:p-2.5 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 text-sm caret-black"
                 placeholder="0.5"
+                style={{caretColor: 'black'}}
               />
             </div>
           </div>
 
 
           {/* Цены */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle" htmlFor="original-price">Цена до скидки (₽)</label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 md:gap-4">
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700" htmlFor="original-price">Цена до скидки (₽)</label>
               <input
                 id="original-price"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={price}
@@ -1335,16 +1458,18 @@ export default function SinglePageProductForm({
                     e.preventDefault();
                   }
                 }}
-                className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main placeholder-text-subtle focus:ring-2 focus:ring-primary-hover transition-all duration-300"
+                className="w-full liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2 sm:p-2.5 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 text-sm caret-black"
                 placeholder="15000"
                 required
+                style={{caretColor: 'black'}}
               />
             </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle" htmlFor="discount-price">Цена продажи (₽)</label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700" htmlFor="discount-price">Цена продажи (₽)</label>
               <input
                 id="discount-price"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={discountPrice}
@@ -1359,15 +1484,17 @@ export default function SinglePageProductForm({
                     e.preventDefault();
                   }
                 }}
-                className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main placeholder-text-subtle focus:ring-2 focus:ring-primary-hover transition-all duration-300"
+                className="w-full liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2 sm:p-2.5 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 text-sm caret-black"
                 placeholder="9990"
+                style={{caretColor: 'black'}}
               />
             </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle" htmlFor="cost-price">Себестоимость (₽)</label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700" htmlFor="cost-price">Себестоимость (₽)</label>
               <input
                 id="cost-price"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={costPrice}
@@ -1382,59 +1509,63 @@ export default function SinglePageProductForm({
                     e.preventDefault();
                   }
                 }}
-                className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main placeholder-text-subtle focus:ring-2 focus:ring-primary-hover transition-all duration-300"
+                className="w-full liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2 sm:p-2.5 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 text-sm caret-black"
                 placeholder="4500"
+                style={{caretColor: 'black'}}
               />
             </div>
           </div>
 
           {/* Артикул и баркод */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle" htmlFor="article">Артикул</label>
+          <div className="grid grid-cols-1 gap-2 sm:gap-3 md:gap-4">
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700" htmlFor="article">Артикул</label>
               <div className="flex gap-2">
                 <input
                   id="article"
                   type="text"
                   value={vendorCode}
                   onChange={(e) => setVendorCode(e.target.value)}
-                  className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main placeholder-text-subtle focus:ring-2 focus:ring-primary-hover transition-all duration-300"
-                  placeholder="SMT-AI-WATCH-01"
+                  className="flex-1 liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2 sm:p-2.5 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 text-sm caret-black"
+                  placeholder="PRDMHANFLNN"
+                  style={{caretColor: 'black'}}
                 />
                 <button
                   type="button"
                   onClick={generateVendorCode}
-                  className="flex-shrink-0 flex items-center justify-center px-3 py-2 bg-violet-100 hover:bg-violet-200 text-primary rounded-lg transition-colors duration-300 text-sm font-medium"
+                  className="flex-shrink-0 flex items-center justify-center px-2 sm:px-3 py-2 bg-purple-100 hover:bg-purple-200 active:bg-purple-300 text-purple-700 rounded-lg transition-colors duration-200 text-xs sm:text-sm font-medium touch-manipulation"
                 >
-                  <RefreshCw className="w-4 h-4 mr-1" />
-                  Генерировать
+                  <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  <span className="hidden sm:inline ml-1">Генерировать</span>
                 </button>
               </div>
             </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-text-subtle" htmlFor="barcode">Баркод (EAN-13)</label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <label className="block text-xs sm:text-sm font-medium text-gray-700" htmlFor="barcode">Баркод (EAN-13)</label>
               <div className="flex gap-2">
                 <input
                   id="barcode"
                   type="text"
+                  inputMode="numeric"
                   value={barcode}
                   onChange={(e) => setBarcode(e.target.value)}
-                  className="w-full liquid-glass-input shadow-inner-soft border-none rounded-lg p-3 text-text-main placeholder-text-subtle focus:ring-2 focus:ring-primary-hover transition-all duration-300"
-                  placeholder="4601234567890"
+                  className="flex-1 liquid-glass-input shadow-inner-soft border-2 border-purple-200 rounded-lg p-2 sm:p-2.5 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all duration-300 text-sm caret-black disabled:opacity-50 disabled:bg-gray-100"
+                  placeholder="2230250704733"
                   disabled={hasSizes}
+                  style={{caretColor: 'black'}}
                 />
                 <button
                   type="button"
                   onClick={generateBarcode}
-                  className="flex-shrink-0 flex items-center justify-center px-3 py-2 bg-violet-100 hover:bg-violet-200 text-primary rounded-lg transition-colors duration-300 text-sm font-medium"
+                  className="flex-shrink-0 flex items-center justify-center px-2 sm:px-3 py-2 bg-purple-100 hover:bg-purple-200 active:bg-purple-300 text-purple-700 rounded-lg transition-colors duration-200 text-xs sm:text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation"
                   disabled={hasSizes}
                 >
-                  <RefreshCw className="w-4 h-4 mr-1" />
-                  Генерировать
+                  <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  <span className="hidden sm:inline ml-1">Генерировать</span>
                 </button>
               </div>
               {hasSizes && (
-                <p className="text-xs text-text-subtle">Баркоды указываются для каждого размера отдельно</p>
+                <p className="text-xs text-gray-500">Баркоды указываются для каждого размера отдельно</p>
               )}
             </div>
           </div>
@@ -1560,22 +1691,22 @@ export default function SinglePageProductForm({
             </div>
           )}
 
-          <div className="pt-4">
+          <div className="pt-3 sm:pt-4">
             <button
               type="submit"
               disabled={isCreating || !cabinetId}
-              className={`w-full flex items-center justify-center gap-2 py-3.5 px-4 bg-primary hover:bg-primary-hover text-white font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-hover shadow-lg shadow-primary/40 hover:shadow-primary-hover/50 transform hover:-translate-y-0.5 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`w-full flex items-center justify-center gap-2 py-3 sm:py-3.5 px-4 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 active:from-purple-800 active:to-purple-900 text-white font-bold rounded-xl focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 shadow-lg shadow-purple-500/40 hover:shadow-purple-600/50 transform active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation text-sm sm:text-base ${
                 isCreating ? 'animate-pulse' : ''
               }`}
             >
               {isCreating ? (
                 <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
                   <span className="animate-in fade-in duration-300">Создание товара...</span>
                 </>
               ) : (
                 <>
-                  <Plus className="w-5 h-5" />
+                  <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
                   Создать товар
                 </>
               )}

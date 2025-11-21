@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, CheckCircle, AlertCircle, Loader2, Package, ExternalLink, Eye } from 'lucide-react';
+import { useOptimizedPolling } from '@/app/hooks/useOptimizedPolling';
 
 export interface ProductTask {
   id: string;
@@ -92,46 +93,21 @@ export default function TaskNotificationsGlobal({ onViewProduct, refreshTrigger 
     loadTasks();
   }, [loadTasks, refreshTrigger]);
   
-  // ❌ УБРАНО: Автоматическое удаление завершенных задач
-  // Теперь задачи удаляются только вручную пользователем или после публикации
-  // useEffect(() => {
-  //   const completedTasks = tasks.filter(t => t.status === 'COMPLETED' || t.status === 'ERROR');
-  //   
-  //   if (completedTasks.length === 0) return;
-  //   
-  //   const timers = completedTasks.map(task => {
-  //     return setTimeout(() => {
-  //       removeTask(task.id);
-  //     }, 30000); // 30 секунд
-  //   });
-  //   
-  //   return () => {
-  //     timers.forEach(timer => clearTimeout(timer));
-  //   };
-  // }, [tasks, removeTask]);
-  
-  // Polling только для активных задач (каждые 50 секунд)
-  useEffect(() => {
-    const activeTasks = tasks.filter(t => t.status !== 'COMPLETED' && t.status !== 'ERROR');
-    
-    if (activeTasks.length === 0) {
-      return; // Не делаем polling если нет активных задач
-    }
-    
-    const interval = setInterval(() => {
-      loadTasks();
-    }, 50000); // 50 секунд - товар создается ~2 минуты
-    
-    return () => {
-      console.log('⏹️ Polling остановлен');
-      clearInterval(interval);
-    };
-  }, [tasks, loadTasks]);
-  
-  if (tasks.length === 0) return null;
-  
+  // ✅ ОПТИМИЗИРОВАНО: Используем оптимизированный polling
+  // Автоматически адаптируется под устройство и видимость страницы
   const activeTasks = tasks.filter(t => t.status !== 'COMPLETED' && t.status !== 'ERROR');
   const completedTasks = tasks.filter(t => t.status === 'COMPLETED' || t.status === 'ERROR');
+  const hasActiveTasks = activeTasks.length > 0;
+  
+  useOptimizedPolling({
+    baseInterval: 50000, // 50 секунд базовый интервал
+    onPoll: loadTasks,
+    enabled: hasActiveTasks, // Polling только если есть активные задачи
+    pauseWhenHidden: true, // Останавливаем когда вкладка неактивна
+    immediate: false
+  });
+  
+  if (tasks.length === 0) return null;
   
   const getStatusIcon = (status: ProductTask['status']) => {
     switch (status) {

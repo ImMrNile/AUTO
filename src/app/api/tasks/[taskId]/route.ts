@@ -5,6 +5,9 @@ import { safePrismaOperation } from '../../../../../lib/prisma-utils';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { taskCache } from '../../../../../lib/task-cache';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 // GET - получить конкретную задачу по ID
 export async function GET(
   request: NextRequest,

@@ -50,11 +50,13 @@ export class WbProductAnalyticsService {
     console.log(`📊 Получение аналитики для товара ${nmId} за ${daysBack} дней`);
 
     try {
-      // Параллельно получаем все данные
-      const [salesData, queriesData] = await Promise.all([
-        this.getSalesData(nmId, daysBack),
-        this.getSearchQueriesData(nmId, daysBack)
-      ]);
+      // ПОСЛЕДОВАТЕЛЬНО получаем данные с задержкой между запросами
+      const salesData = await this.getSalesData(nmId, daysBack);
+      
+      // Задержка 3 секунды между внутренними запросами (WB API очень строгий)
+      await this.delay(3000);
+      
+      const queriesData = await this.getSearchQueriesData(nmId, daysBack);
 
       // Рассчитываем метрики конверсии
       const conversionMetrics = this.calculateConversionMetrics(salesData, queriesData);
@@ -240,31 +242,58 @@ export class WbProductAnalyticsService {
   async getBulkProductAnalytics(
     nmIds: number[], 
     daysBack: number = 30,
-    delayMs: number = 1000
+    delayMs: number = 3000 // Увеличена задержка до 3 секунд
   ): Promise<ProductAnalyticsData[]> {
     console.log(`📊 Массовое получение аналитики для ${nmIds.length} товаров`);
+    console.log(`⏱️ Задержка между запросами: ${delayMs}мс`);
 
     const results: ProductAnalyticsData[] = [];
+    let consecutiveErrors = 0;
+    const maxConsecutiveErrors = 3;
 
     for (let i = 0; i < nmIds.length; i++) {
       const nmId = nmIds[i];
       
       try {
+        console.log(`📊 [${i + 1}/${nmIds.length}] Получение аналитики для товара ${nmId}...`);
+        
         const analytics = await this.getProductAnalytics(nmId, daysBack);
         results.push(analytics);
+        consecutiveErrors = 0; // Сбрасываем счетчик ошибок при успехе
 
         // Задержка между запросами для соблюдения rate limits
         if (i < nmIds.length - 1) {
+          console.log(`⏳ Ожидание ${delayMs}мс перед следующим запросом...`);
           await this.delay(delayMs);
         }
 
-      } catch (error) {
+      } catch (error: any) {
         console.warn(`⚠️ Ошибка получения аналитики для товара ${nmId}:`, error);
+        
+        // Проверяем, является ли это 429 ошибкой
+        if (error.message?.includes('429') || error.message?.includes('Too Many Requests')) {
+          consecutiveErrors++;
+          console.warn(`⚠️ Rate limit достигнут (${consecutiveErrors}/${maxConsecutiveErrors})`);
+          
+          // Если слишком много подряд 429 ошибок, увеличиваем задержку
+          if (consecutiveErrors >= maxConsecutiveErrors) {
+            const extendedDelay = delayMs * 3;
+            console.warn(`⏸️ Слишком много 429 ошибок, увеличиваем задержку до ${extendedDelay}мс`);
+            await this.delay(extendedDelay);
+            consecutiveErrors = 0;
+          } else {
+            // Обычная задержка при 429
+            await this.delay(delayMs * 2);
+          }
+        }
+        
         results.push(this.getEstimatedAnalytics(nmId, error));
       }
     }
 
     console.log(`✅ Получена аналитика для ${results.length} товаров`);
+    console.log(`   - Успешно: ${results.filter(r => r.syncStatus !== 'error').length}`);
+    console.log(`   - Ошибок: ${results.filter(r => r.syncStatus === 'error').length}`);
     return results;
   }
 

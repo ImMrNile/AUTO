@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/cron/sync-analytics",
+      "path": "/api/cron/orchestrator",
       "schedule": "0 0 * * *"
     }
   ],

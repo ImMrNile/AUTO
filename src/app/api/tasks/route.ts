@@ -1,9 +1,13 @@
-// src/app/api/tasks/route.ts - API для управления фоновыми задачами создания товаров
+﻿// src/app/api/tasks/route.ts - API для управления фоновыми задачами создания товаров
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { safePrismaOperation } from '@/lib/prisma-utils';
 import { AuthService } from '@/lib/auth/auth-service';
 import { taskCache } from '@/lib/task-cache';
+import { getCached, setCached, deleteCached } from '@/lib/cache/redis';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // GET - получить все активные задачи пользователя
 export async function GET(request: NextRequest) {
@@ -16,13 +20,29 @@ export async function GET(request: NextRequest) {
       }, { status: 401 });
     }
 
-    // Получаем только активные задачи + завершенные за последние 5 минут
-    const fiveMinutesAgo = new Date();
-    fiveMinutesAgo.setMinutes(fiveMinutesAgo.getMinutes() - 5);
-
     // Проверяем параметр status из query
     const { searchParams } = new URL(request.url);
     const statusFilter = searchParams.get('status');
+
+    // Формируем ключ кеша
+    const cacheKey = `tasks:${user.id}:${statusFilter || 'all'}`;
+
+    // Проверяем кеш
+    const cached = await getCached<any[]>(cacheKey);
+    if (cached) {
+      console.log(`✅ [Tasks API] Данные взяты из кеша для пользователя ${user.id}`);
+      return NextResponse.json({
+        success: true,
+        tasks: cached,
+        fromCache: true
+      });
+    }
+
+    console.log(`🔄 [Tasks API] Загрузка задач из БД для пользователя ${user.id}`);
+
+    // Получаем только активные задачи + завершенные за последние 24 часа
+    const twentyFourHoursAgo = new Date();
+    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
 
     let whereCondition: any = {
       userId: user.id
@@ -46,7 +66,7 @@ export async function GET(request: NextRequest) {
         }
       ];
     } else {
-      // Стандартная логика: активные + завершенные за 5 минут
+      // Стандартная логика: активные + завершенные за 24 часа
       whereCondition.OR = [
         {
           status: {
@@ -58,7 +78,7 @@ export async function GET(request: NextRequest) {
             in: ['COMPLETED', 'ERROR']
           },
           completedAt: {
-            gte: fiveMinutesAgo
+            gte: twentyFourHoursAgo
           }
         }
       ];
@@ -165,9 +185,14 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    // Сохраняем в кеш на 10 секунд (задачи обновляются часто)
+    await setCached(cacheKey, formattedTasks, 10);
+    console.log(`💾 [Tasks API] Данные сохранены в кеш (TTL: 10с)`);
+
     return NextResponse.json({
       success: true,
-      tasks: formattedTasks
+      tasks: formattedTasks,
+      fromCache: false
     });
   } catch (error: any) {
     console.error('Ошибка получения задач:', error);
@@ -303,9 +328,14 @@ export async function PUT(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // Инвалидируем кеш для этой задачи
-    const cacheKey = `${user.id}:${taskId}`;
-    taskCache.invalidate(cacheKey);
+    // Инвалидируем кеш для этой задачи (старый кеш)
+    const oldCacheKey = `${user.id}:${taskId}`;
+    taskCache.invalidate(oldCacheKey);
+
+    // Инвалидируем Redis кеш для всех списков задач пользователя
+    await deleteCached(`tasks:${user.id}:all`);
+    await deleteCached(`tasks:${user.id}:in-progress`);
+    console.log(`🗑️ [Tasks API] Кеш инвалидирован после обновления задачи ${taskId}`);
 
     return NextResponse.json({
       success: true,
@@ -367,6 +397,11 @@ export async function DELETE(request: NextRequest) {
       }),
       'удаление задачи'
     );
+
+    // Инвалидируем Redis кеш для всех списков задач пользователя
+    await deleteCached(`tasks:${user.id}:all`);
+    await deleteCached(`tasks:${user.id}:in-progress`);
+    console.log(`🗑️ [Tasks API] Кеш инвалидирован после удаления задачи ${taskId}`);
 
     return NextResponse.json({
       success: true

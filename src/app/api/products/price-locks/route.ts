@@ -1,7 +1,10 @@
-// src/app/api/products/price-locks/route.ts
+﻿// src/app/api/products/price-locks/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { AuthService } from '../../../../../lib/auth/auth-service';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // GET - Получить статусы закрепления цен для всех товаров пользователя
 export async function GET(request: NextRequest) {

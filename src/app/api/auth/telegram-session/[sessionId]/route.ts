@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '../../../../../../lib/prisma'
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { sessionId: string } }
@@ -92,6 +95,7 @@ export async function GET(
       response.cookies.set('session_token', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax', // Для desktop auth используем lax
         maxAge: 30 * 24 * 60 * 60,
         path: '/'
       })

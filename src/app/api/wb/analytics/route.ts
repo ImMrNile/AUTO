@@ -1,9 +1,12 @@
-// src/app/api/wb/analytics/route.ts - API для работы с WB Analytics
+﻿// src/app/api/wb/analytics/route.ts - API для работы с WB Analytics
 
 import { NextRequest, NextResponse } from 'next/server';
 import { WbAnalyticsService, CategoryKeywords } from '../../../../../lib/services/wbAnalyticsService';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { UserWbTokenService } from '../../../../../lib/services/userWbTokenService';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {

@@ -1,9 +1,12 @@
-// src/app/api/tasks/process/route.ts - API для запуска фоновой обработки задачи
+﻿// src/app/api/tasks/process/route.ts - API для запуска фоновой обработки задачи
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { BackgroundTaskProcessor } from '../../../../../lib/services/backgroundTaskProcessor';
 import { prisma } from '../../../../../lib/prisma';
 import { safePrismaOperation } from '../../../../../lib/prisma-utils';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/tasks/process - Запустить фоновую обработку задачи

@@ -1,7 +1,10 @@
-// src/app/api/wb/characteristics/route.ts
+﻿// src/app/api/wb/characteristics/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthService } from '@/lib/auth/auth-service';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {

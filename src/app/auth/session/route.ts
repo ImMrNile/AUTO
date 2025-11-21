@@ -1,6 +1,9 @@
-import { createClient } from '@/lib/supabase/server'
+﻿import { createClient } from '@/lib/supabase/server'
 import { AuthService } from '@/lib/auth/auth-service'
 import { NextResponse } from 'next/server'
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {

@@ -8,6 +8,9 @@ import { WB_COLORS } from '../../../../../../lib/config/wbColors';
 import { wbApiService } from '../../../../../../lib/services/wbApiService';
 import { UnifiedAISystem } from '../../../../../../lib/services/unifiedAISystem';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 // POST метод для сохранения финальных данных и публикации товара
 export async function POST(
   request: NextRequest,
@@ -185,6 +188,8 @@ export async function POST(
           id: true,
           name: true,
           price: true,
+          discountPrice: true, // Цена со скидкой из таблицы
+          costPrice: true, // Себестоимость из таблицы
           status: true,
           subcategoryId: true,
           dimensions: true,
@@ -346,10 +351,10 @@ export async function POST(
       const vendorCode = `PRD${product.id.slice(-8).toUpperCase()}`;
       const barcode = `2200000${product.id.slice(-6)}${Math.floor(Math.random() * 10)}`;
 
-      // Получаем цены из wbData
+      // Получаем цены из полей таблицы (приоритет) или из wbData (fallback)
       const wbData = product.wbData as any;
-      const originalPrice = wbData?.originalPrice || product.price;
-      const discountPrice = wbData?.discountPrice || product.price;
+      const originalPrice = product.price || wbData?.originalPrice || 0;
+      const discountPrice = product.discountPrice || wbData?.discountPrice || product.price || 0;
       
       console.log(`💰 [WB Publish] Цены товара:`);
       console.log(`   - Оригинальная цена: ${originalPrice}₽ (отправляем ${Math.round(originalPrice)} руб)`);
@@ -389,6 +394,34 @@ export async function POST(
       const weight = productDimensions?.weight || 0.5; // вес в кг
       
       console.log(`📦 [WB Publish] Габариты товара: ${length}x${width}x${height} см, вес: ${weight} кг`);
+      
+      // Получаем фотографии товара из wbData.images или originalImage (fallback)
+      let productImages: string[] = [];
+      
+      if (wbData?.images) {
+        // Новый формат: все фотографии в wbData.images
+        if (wbData.images.main) {
+          productImages.push(wbData.images.main);
+        }
+        if (Array.isArray(wbData.images.additional)) {
+          productImages.push(...wbData.images.additional);
+        }
+      } else {
+        // Старый формат: только originalImage
+        productImages = Array.isArray(product.originalImage) 
+          ? product.originalImage 
+          : (product.originalImage ? [product.originalImage] : []);
+      }
+      
+      console.log(`📸 [WB Publish] Фотографий товара: ${productImages.length}`);
+      if (productImages.length > 0) {
+        console.log(`   Главное фото: ${productImages[0].substring(0, 100)}...`);
+        if (productImages.length > 1) {
+          console.log(`   Дополнительных фото: ${productImages.length - 1}`);
+        }
+      } else {
+        console.warn(`⚠️ [WB Publish] У товара НЕТ фотографий!`);
+      }
 
       // Подготавливаем данные для Wildberries API в правильном формате
       const wbProductData = {
@@ -402,8 +435,16 @@ export async function POST(
             length: length,
             width: width,
             height: height,
-            weightBrutto: Math.round(weight * 1000) // переводим кг в граммы
+            weightBrutto: Math.round(weight * 1000) // переводим кг в граммы (weight уже в кг)
           },
+          // 📸 Добавляем фотографии товара
+          photos: productImages.map((url: string) => ({
+            big: url,
+            c246x328: url,
+            c516x688: url,
+            square: url,
+            tm: url
+          })),
           // 🔥 Используем ТОЛЬКО заполненные характеристики
           characteristics: filledCharacteristics.map((char: any) => {
             let processedValue = char.value;
@@ -530,7 +571,7 @@ export async function POST(
             );
           }),
           sizes: [{
-            price: Math.round(discountPrice), // Цена со скидкой в рублях
+            price: Math.round(originalPrice), // 🔥 ИСПРАВЛЕНО: отправляем ОРИГИНАЛЬНУЮ цену, скидку установим отдельно
             skus: [barcode]
           }]
         }]
@@ -767,6 +808,16 @@ export async function POST(
             wbProductId = firstItem.nmID || firstItem.nmId || firstItem.id;
             console.log(`📦 [WB API] Получен ID товара: ${wbProductId}`);
           }
+          
+          // 🔧 ИСПРАВЛЕНИЕ: Если data пустой объект и нет ошибок - товар отправлен на асинхронную обработку
+          if (!wbProductId && !wbTaskId && !hasValidationErrors && 
+              wbResponseData.error === false && 
+              (!wbResponseData.errorText || wbResponseData.errorText.trim() === '')) {
+            console.log('✅ [WB API] Товар отправлен на асинхронную обработку (data пустой, но нет ошибок)');
+            // Создаем временный taskId для отслеживания
+            wbTaskId = `async-${vendorCode}-${Date.now()}`;
+            console.log(`📋 [WB API] Создан временный taskId: ${wbTaskId}`);
+          }
         }
         
         // 🔍 ВСЕГДА ЗАПРАШИВАЕМ ДЕТАЛЬНЫЕ ОШИБКИ ЕСЛИ ТОВАР НЕ СОЗДАН (независимо от additionalErrors)
@@ -933,6 +984,14 @@ export async function POST(
                     height: height,
                     weightBrutto: Math.round(weight * 1000)
                   },
+                  // 📸 Добавляем фотографии товара
+                  photos: productImages.map((url: string) => ({
+                    big: url,
+                    c246x328: url,
+                    c516x688: url,
+                    square: url,
+                    tm: url
+                  })),
                   characteristics: agent3Result.data.characteristics.map((char: any) => {
                     // ✅ Agent 3 уже вернул правильный формат - НЕ МЕНЯЕМ ЕГО!
                     // Для чисел: value = число
@@ -967,7 +1026,7 @@ export async function POST(
                     return true;
                   }),
                   sizes: [{
-                    price: Math.round(discountPrice),
+                    price: Math.round(originalPrice), // 🔥 ИСПРАВЛЕНО: отправляем ОРИГИНАЛЬНУЮ цену
                     skus: [barcode]
                   }]
                 }]
@@ -1119,12 +1178,16 @@ export async function POST(
         }
         
         // Сохраняем успешный результат в БД
+        // Если есть wbProductId - товар создан, если только wbTaskId - на асинхронной обработке
+        const productStatus = wbProductId ? 'PUBLISHED' : 'PENDING';
+        const apiStatus = wbProductId ? 'published' : 'pending_async';
+        
         await safePrismaOperation(
           () => prisma.product.update({
             where: { id: params.id },
             data: {
-              publishedAt: new Date(),
-              status: 'PUBLISHED',
+              publishedAt: wbProductId ? new Date() : null,
+              status: productStatus,
               errorMessage: null,
               wbData: JSON.stringify({
                 wbProductId: wbProductId,
@@ -1135,7 +1198,7 @@ export async function POST(
                 vendorCode: vendorCode,
                 barcode: barcode,
                 productData: wbProductData,
-                apiStatus: 'published',
+                apiStatus: apiStatus,
                 // 🔥 СОХРАНЯЕМ ЦЕНЫ для последующей установки скидки
                 originalPrice: originalPrice,
                 discountPrice: discountPrice
@@ -1144,10 +1207,46 @@ export async function POST(
           }),
           'обновление данных WB после успешной публикации'
         );
+        
+        // 🔥 ОБНОВЛЯЕМ СТАТУС ЗАДАЧИ НА COMPLETED
+        try {
+          const task = await prisma.productCreationTask.findFirst({
+            where: {
+              productId: params.id,
+              userId: user.id
+            }
+          });
+          
+          if (task) {
+            await prisma.productCreationTask.update({
+              where: { id: task.id },
+              data: {
+                status: 'COMPLETED',
+                progress: 100,
+                currentStage: wbProductId ? 'Опубликовано на WB' : 'Отправлено на обработку WB',
+                completedAt: new Date(),
+                errorMessage: null
+              }
+            });
+            console.log(`✅ [Task] Статус задачи обновлен на COMPLETED`);
+          } else {
+            console.warn(`⚠️ [Task] Задача не найдена для товара ${params.id}`);
+          }
+        } catch (taskError) {
+          console.error('❌ [Task] Ошибка обновления статуса задачи:', taskError);
+          // Не прерываем выполнение, если не удалось обновить задачу
+        }
       
-        console.log('✅ [WB API] Товар успешно опубликован на Wildberries');
+        if (wbProductId) {
+          console.log('✅ [WB API] Товар успешно опубликован на Wildberries');
+        } else {
+          console.log('⏳ [WB API] Товар отправлен на асинхронную обработку WB');
+        }
         console.log(`📊 [WB API] Статус после публикации:`);
-        console.log(`   - wbProductId: ${wbProductId || 'не получен'}`);
+        console.log(`   - status: ${productStatus}`);
+        console.log(`   - apiStatus: ${apiStatus}`);
+        console.log(`   - wbProductId: ${wbProductId || 'не получен (асинхронная обработка)'}`);
+        console.log(`   - wbTaskId: ${wbTaskId || 'нет'}`);
         console.log(`   - vendorCode: ${vendorCode}`);
         console.log(`   - barcode: ${barcode}`);
         console.log(`   - originalPrice: ${originalPrice}`);
@@ -1157,7 +1256,9 @@ export async function POST(
         let discountResult: { success: boolean; data?: any; error?: string } | null = null;
         
         // Проверяем условия для установки скидки
-        const shouldSetDiscount = originalPrice && discountPrice && originalPrice > discountPrice;
+        const hasDiscount = originalPrice && discountPrice && originalPrice > discountPrice;
+        const shouldSetDiscount = hasDiscount && wbProductId; // Только если товар уже создан
+        const shouldSetDiscountLater = hasDiscount && !wbProductId && wbTaskId; // Для асинхронных товаров
         
         if (shouldSetDiscount) {
           console.log(`💰 [WB Discount] Начинаем установку скидки для товара`);
@@ -1170,33 +1271,49 @@ export async function POST(
           try {
             let finalNmId = wbProductId;
             
-            // Если nmId не получен из ответа, пытаемся получить его по vendorCode
+            // Проверяем, что товар опубликован на WB
             if (!finalNmId) {
-              console.log(`🔍 [WB Discount] nmId не получен из ответа, пытаемся получить по vendorCode ${vendorCode}...`);
+              console.log(`🔍 [WB Discount] nmId не получен из ответа, проверяем публикацию товара по vendorCode ${vendorCode}...`);
               console.log('⏳ [WB Discount] Ожидание 15 секунд для обработки товара на WB...');
               await new Promise(resolve => setTimeout(resolve, 15000));
               
+              console.log('🔍 [WB Discount] Проверка: опубликован ли товар на WB...');
               const nmIdResult = await wbApiService.getNmIdByVendorCode(
                 cabinet.apiToken,
                 vendorCode,
-                5, // maxRetries
-                3000 // retryDelay
+                5, // maxRetries - будет делать 5 попыток с увеличивающейся задержкой
+                3000 // retryDelay - начальная задержка 3 секунды
               );
               
               if (nmIdResult.success && nmIdResult.data?.nmId) {
                 finalNmId = nmIdResult.data.nmId;
-                console.log(`✅ [WB Discount] Получен nmId: ${finalNmId} по vendorCode`);
+                console.log(`✅ [WB Discount] Товар успешно опубликован! nmId: ${finalNmId}`);
               } else {
-                console.error(`❌ [WB Discount] Не удалось получить nmId по vendorCode: ${nmIdResult.error}`);
+                console.error(`❌ [WB Discount] Товар еще не опубликован на WB: ${nmIdResult.error}`);
                 discountResult = {
                   success: false,
-                  error: `Не удалось получить nmId товара: ${nmIdResult.error}`
+                  error: `Товар еще обрабатывается на WB. Попробуйте установить скидку позже через интерфейс.`
                 };
               }
             } else {
-              // Если nmId получен сразу, все равно ждем немного для обработки
-              console.log('⏳ [WB Discount] Ожидание 10 секунд для обработки товара на WB...');
+              // Если nmId получен сразу, проверяем что товар действительно доступен
+              console.log('⏳ [WB Discount] Ожидание 10 секунд для полной обработки товара на WB...');
               await new Promise(resolve => setTimeout(resolve, 10000));
+              
+              console.log('🔍 [WB Discount] Проверка доступности товара на WB...');
+              const verifyResult = await wbApiService.getNmIdByVendorCode(
+                cabinet.apiToken,
+                vendorCode,
+                2, // Только 2 попытки для проверки
+                2000
+              );
+              
+              if (!verifyResult.success) {
+                console.warn(`⚠️ [WB Discount] Товар создан, но еще не полностью обработан на WB`);
+                // Продолжаем с полученным nmId, но логируем предупреждение
+              } else {
+                console.log(`✅ [WB Discount] Товар подтвержден на WB, готов к установке скидки`);
+              }
             }
             
             // Устанавливаем скидку, если получили nmId
@@ -1211,7 +1328,9 @@ export async function POST(
                 finalNmId,
                 discountPrice,
                 3, // maxRetries
-                5000 // retryDelay
+                5000, // retryDelay
+                vendorCode,
+                originalPrice // ДОБАВЛЕНО: передаем оригинальную цену
               );
               
               if (discountResult.success) {
@@ -1253,6 +1372,73 @@ export async function POST(
               success: false,
               error: discountError instanceof Error ? discountError.message : 'Неизвестная ошибка'
             };
+          }
+        } else if (shouldSetDiscountLater) {
+          // Для асинхронных товаров - пытаемся установить скидку через некоторое время
+          console.log('⏳ [WB Discount] Товар на асинхронной обработке, попытка установить скидку через 30 секунд...');
+          console.log(`   - VendorCode: ${vendorCode}`);
+          console.log(`   - Оригинальная цена: ${originalPrice}₽`);
+          console.log(`   - Цена со скидкой: ${discountPrice}₽`);
+          
+          try {
+            // Ждем 30 секунд для обработки товара на WB
+            await new Promise(resolve => setTimeout(resolve, 30000));
+            
+            // Пытаемся получить nmId
+            const nmIdResult = await wbApiService.getNmIdByVendorCode(
+              cabinet.apiToken,
+              vendorCode,
+              5, // maxRetries
+              5000 // retryDelay
+            );
+            
+            if (nmIdResult.success && nmIdResult.data?.nmId) {
+              const nmId = nmIdResult.data.nmId;
+              console.log(`✅ [WB Discount] Получен nmId: ${nmId}, устанавливаем скидку...`);
+              
+              discountResult = await wbApiService.setProductDiscountWithRetry(
+                cabinet.apiToken,
+                nmId,
+                discountPrice,
+                originalPrice
+              );
+              
+              if (discountResult.success) {
+                console.log(`✅ [WB Discount] Скидка успешно установлена для асинхронного товара`);
+                
+                // Обновляем wbData с nmId и информацией о скидке
+                await safePrismaOperation(
+                  () => prisma.product.update({
+                    where: { id: params.id },
+                    data: {
+                      wbNmId: String(nmId),
+                      publishedAt: new Date(),
+                      status: 'PUBLISHED',
+                      wbData: JSON.stringify({
+                        wbProductId: nmId,
+                        wbTaskId: wbTaskId,
+                        wbResponse: wbResponseData,
+                        publishedAt: new Date().toISOString(),
+                        cabinet: cabinet.name,
+                        vendorCode: vendorCode,
+                        barcode: barcode,
+                        productData: wbProductData,
+                        apiStatus: 'published',
+                        discountApplied: true,
+                        originalPrice: originalPrice,
+                        discountPrice: discountPrice
+                      })
+                    }
+                  }),
+                  'обновление данных WB после установки скидки для асинхронного товара'
+                );
+              }
+            } else {
+              console.warn(`⚠️ [WB Discount] Не удалось получить nmId для асинхронного товара: ${nmIdResult.error}`);
+              console.warn(`⚠️ [WB Discount] Скидку можно будет установить позже вручную через личный кабинет WB`);
+            }
+          } catch (asyncDiscountError) {
+            console.error(`❌ [WB Discount] Ошибка при установке скидки для асинхронного товара:`, asyncDiscountError);
           }
         } else if (!originalPrice || !discountPrice) {
           console.log('⚠️ [WB Discount] Пропускаем установку скидки: цены не указаны');
@@ -1332,13 +1518,16 @@ export async function POST(
       
         return NextResponse.json({
           success: true,
-          message: 'Товар сохранен и успешно опубликован на Wildberries',
+          message: wbProductId 
+            ? 'Товар сохранен и успешно опубликован на Wildberries' 
+            : 'Товар отправлен на асинхронную обработку WB. Проверьте статус через несколько минут.',
           productId: params.id,
-          status: 'PUBLISHED',
-          wbPublished: true,
+          status: productStatus,
+          wbPublished: !!wbProductId,
+          wbPending: !wbProductId && !!wbTaskId,
           wbProductId: wbProductId,
           wbTaskId: wbTaskId,
-          publishedAt: new Date().toISOString(),
+          publishedAt: wbProductId ? new Date().toISOString() : null,
           cabinet: cabinet.name,
           vendorCode: vendorCode,
           barcode: barcode,
@@ -1474,10 +1663,10 @@ async function handleCreateProduct(data: any, product: any, cabinet: any) {
   const vendorCode = `PRD${product.id.slice(-8).toUpperCase()}`;
   const barcode = `2200000${product.id.slice(-6)}${Math.floor(Math.random() * 10)}`;
 
-  // Получаем цены из wbData
+  // Получаем цены из полей таблицы (приоритет) или из wbData (fallback)
   const wbData = product.wbData as any;
-  const originalPrice = wbData?.originalPrice || product.price;
-  const discountPrice = wbData?.discountPrice || product.price;
+  const originalPrice = product.price || wbData?.originalPrice || 0;
+  const discountPrice = product.discountPrice || wbData?.discountPrice || product.price || 0;
 
   // Получаем правильный wbSubjectId из подкатегории
   const wbSubjectId = product.subcategory?.wbSubjectId || product.subcategoryId;
@@ -1542,7 +1731,7 @@ async function handleCreateProduct(data: any, product: any, cabinet: any) {
         }
       }).filter(Boolean) || [],
       sizes: [{
-        price: Math.round(discountPrice),
+        price: Math.round(originalPrice), // 🔥 ИСПРАВЛЕНО: отправляем ОРИГИНАЛЬНУЮ цену, скидку установим отдельно
         skus: [barcode]
       }]
     }]

@@ -33,6 +33,8 @@ model User {
   auditLogs        AuditLog[]
   creationTasks    ProductCreationTask[]
   telegramSessions TelegramSession[]
+  promotions       ProductPromotion[]
+  aiChats          ProductAiChat[]
 
   @@index([email])
   @@index([supabaseId])
@@ -119,6 +121,8 @@ model Product {
   wbNmId              String?              // Wildberries nmID
   wbImtId             String?              // Wildberries imtID
   vendorCode          String?              // Артикул продавца
+  barcode             String?              // Баркод товара (для FBS остатков)
+  barcodes            Json?                // Массив всех баркодов (для товаров с размерами)
   brand               String?              // Бренд
   
   // Pricing
@@ -129,7 +133,9 @@ model Product {
   lockedPrice         Float?               // Закрепленная цена
   
   // Stock Information
-  stock               Int                  @default(0)  // Остаток на складе
+  stock               Int                  @default(0)  // Остаток на складе (общий)
+  fbsStock            Int                  @default(0)  // Остаток на FBS складах
+  fbwStock            Int                  @default(0)  // Остаток на FBW складах
   reserved            Int                  @default(0)  // Зарезервировано
   inTransit           Int                  @default(0)  // В пути к клиенту
   inReturn            Int                  @default(0)  // Возвраты
@@ -149,14 +155,15 @@ model Product {
   subcategory         WbSubcategory?       @relation(fields: [subcategoryId], references: [id])
   agentWorkflows      AgentWorkflow[]
   agentExecutions     AgentExecutionLog[]
-  gpt5SearchLogs      GPT5SearchLog[]
-  gpt5AnalysisResults GPT5AnalysisResult[]
   characteristics     ProductCharacteristic[]
   infographics        ProductInfographic[]
   infographicRequests InfographicRequest[]
   publications        ProductPublication[]
   creationTasks       ProductCreationTask[]
   analytics           ProductAnalytics?
+  optimizations       ProductOptimization[]
+  promotions          ProductPromotion[]
+  aiChats             ProductAiChat[]
 
   @@index([userId])
   @@index([status])
@@ -378,107 +385,31 @@ model AgentExecutionLog {
   @@map("agent_execution_logs")
 }
 
-model GPT5SearchLog {
-  id                String   @id @default(cuid())
-  productId         String
-  workflowId        String
-  agentType         String
-  searchQuery       String
-  searchType        String
-  searchResults     Json
-  sourcesFound      Int      @default(0)
-  relevantSources   Int      @default(0)
-  dataExtracted     Json?
-  searchConfidence  Float?
-  sourceReliability Float?
-  dataCompleteness  Float?
-  searchDuration    Int?
-  apiCallsUsed      Int      @default(0)
-  tokensUsed        Int      @default(0)
-  createdAt         DateTime @default(now())
-  product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-
-  @@index([productId])
-  @@index([workflowId])
-  @@index([searchType])
-  @@index([createdAt])
-  @@map("gpt5_search_logs")
-}
-
-model GPT5AnalysisResult {
-  id                      String                 @id @default(cuid())
-  productId               String
-  workflowId              String
-  agent1Data              Json
-  agent2Data              Json
-  agent3Data              Json
-  totalCharacteristics    Int                    @default(0)
-  filledCharacteristics   Int                    @default(0)
-  fillPercentage          Float?
-  overallConfidence       Float?
-  searchQueriesCount      Int                    @default(0)
-  uniqueSourcesFound      Int                    @default(0)
-  highQualitySourcesCount Int                    @default(0)
-  totalProcessingTime     Int?
-  agent1ProcessingTime    Int?
-  agent2ProcessingTime    Int?
-  agent3ProcessingTime    Int?
-  totalTokensUsed         Int                    @default(0)
-  totalApiCalls           Int                    @default(0)
-  estimatedCost           Float?
-  validationErrors        Json?
-  dataQualityScore        Int?
-  readyForPublication     Boolean                @default(false)
-  comparedToOptimized     Json?
-  comparedToLegacy        Json?
-  createdAt               DateTime               @default(now())
-  updatedAt               DateTime               @updatedAt
-  product                 Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
-  characteristics         ProductCharacteristic[]
-
-  @@index([productId])
-  @@index([workflowId])
-  @@index([fillPercentage])
-  @@index([dataQualityScore])
-  @@index([createdAt])
-  @@map("gpt5_analysis_results")
-}
 
 model ProductCharacteristic {
   id                    String              @id @default(cuid())
   productId             String
-  analysisResultId      String?
   characteristicId      Int?
   wbCharacteristicId    Int?
   name                  String
   value                 String?
   originalValue         String?
-  confidence            Float               @default(0)
-  mappingConfidence     Float               @default(0)
-  combinedConfidence    Float               @default(0)
+  confidence            Float?
   source                String?
-  mappingReasoning      String?
-  detectedType          String?
-  expectedType          String?
-  typeCompatible        Boolean             @default(false)
-  isRequired            Boolean             @default(false)
   validationStatus      String?
-  transformationApplied String?
-  qualityIndicators     Json?
-  alternatives          Json?
-  possibleValues        Json?
-  recommendedAction     String?
-  isUserModified        Boolean             @default(false)
-  userModifiedAt        DateTime?
+  validationNotes       String?
+  isRequired            Boolean             @default(false)
+  isUserEdited          Boolean             @default(false)
+  editedAt              DateTime?
+  editedBy              String?
+  metadata              Json?
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
   product               Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
-  analysisResult        GPT5AnalysisResult? @relation(fields: [analysisResultId], references: [id], onDelete: SetNull)
   wbCharacteristic      WbCategoryCharacteristic? @relation(fields: [characteristicId], references: [id], onDelete: SetNull)
 
   @@unique([productId, characteristicId])
   @@index([productId])
-  @@index([analysisResultId])
   @@index([characteristicId])
   @@index([confidence])
   @@index([validationStatus])
@@ -607,6 +538,7 @@ model ProductCreationTask {
   @@index([userId])
   @@index([status])
   @@index([createdAt])
+  @@index([userId, createdAt(sort: Desc), status]) // Оптимальный индекс для SSE
   @@map("product_creation_tasks")
 }
 
@@ -661,6 +593,7 @@ model TelegramSession {
   id            String   @id @default(cuid())
   sessionId     String   @unique
   userId        String?
+  token         String?  // Session token для авторизации
   authenticated Boolean  @default(false)
   expiresAt     DateTime
   createdAt     DateTime @default(now())
@@ -671,4 +604,209 @@ model TelegramSession {
   @@index([userId])
   @@index([expiresAt])
   @@map("telegram_sessions")
+}
+
+model ProductOptimization {
+  id                    String   @id @default(cuid())
+  productId             String
+  goldenKeywords        String   // JSON: [{phrase, cpc, orders, roi}]
+  unprofitableKeywords  String   // JSON: [{phrase, cpc, orders, roi}]
+  promisingKeywords     String   // JSON: [{phrase, position, cpc, orders}]
+  cardOptimizations     String   // JSON: [{type, description, expectedImpact}]
+  expectedSalesIncrease Float    // Прогноз увеличения продаж (%)
+  expectedROIIncrease   Float    // Прогноз увеличения ROI (%)
+  createdAt             DateTime @default(now())
+  
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  @@index([productId])
+  @@index([createdAt])
+  @@map("product_optimizations")
+}
+
+model ProductPromotion {
+  id                 String   @id @default(cuid())
+  productId          String
+  userId             String
+  status             String   @default("ACTIVE") // ACTIVE, PAUSED, COMPLETED
+  startDate          DateTime
+  endDate            DateTime
+  checkInterval      Int      @default(4) // Часы между проверками
+  
+  // Метрики начальные
+  initialSales       Int      @default(0)
+  initialConversion  Float    @default(0)
+  initialCTR         Float    @default(0)
+  initialROAS        Float    @default(0)
+  
+  // Метрики текущие
+  currentSales       Int      @default(0)
+  currentConversion  Float    @default(0)
+  currentCTR         Float    @default(0)
+  currentROAS        Float    @default(0)
+  
+  // Счетчики
+  checksPerformed    Int      @default(0)
+  actionsApplied     Int      @default(0)
+  
+  // AI поля
+  aiThreadId         String?  // ID Thread в OpenAI Assistants API
+  aiEnabled          Boolean  @default(false) // Включено ли автоматическое управление AI
+  lastAiCheckAt      DateTime? // Время последней проверки AI
+  
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reports            PromotionReport[]
+  actions            PromotionAction[]
+  decisions          PromotionDecision[]
+  actionLogs         PromotionActionLog[]
+  
+  @@index([productId])
+  @@index([userId])
+  @@index([status])
+  @@index([aiEnabled, status])
+  @@map("product_promotions")
+}
+
+model PromotionReport {
+  id              String   @id @default(cuid())
+  promotionId     String
+  
+  // Данные на момент проверки
+  sales           Int      @default(0)
+  conversion      Float    @default(0)
+  ctr             Float    @default(0)
+  roas            Float    @default(0)
+  adSpend         Float    @default(0)
+  
+  // Анализ от GPT
+  diagnosis       String   @db.Text
+  improvements    String   @db.Text // JSON
+  recommendations String   @db.Text // JSON
+  
+  createdAt       DateTime @default(now())
+  
+  promotion       ProductPromotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  
+  @@index([promotionId])
+  @@map("promotion_reports")
+}
+
+model PromotionAction {
+  id          String   @id @default(cuid())
+  promotionId String
+  
+  // Тип действия
+  type        String   // BID_INCREASE, BID_DECREASE, ADD_KEYWORD, ADD_MINUS_WORD, UPDATE_TITLE, etc.
+  
+  // Детали
+  details     String   @db.Text // JSON
+  
+  // Результат
+  applied     Boolean  @default(false)
+  result      String?  @db.Text
+  error       String?  @db.Text
+  
+  createdAt   DateTime @default(now())
+  
+  promotion   ProductPromotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  
+  @@index([promotionId])
+  @@index([type])
+  @@map("promotion_actions")
+}
+
+model PromotionDecision {
+  id          String    @id @default(cuid())
+  promotionId String
+  diagnosis   String    @db.Text
+  actions     Json
+  forecast    Json?
+  executed    Boolean   @default(false)
+  executedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  
+  promotion   ProductPromotion     @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  actionLogs  PromotionActionLog[]
+  
+  @@index([promotionId, createdAt(sort: Desc)])
+  @@map("promotion_decisions")
+}
+
+model PromotionActionLog {
+  id            String    @id @default(cuid())
+  promotionId   String
+  decisionId    String?
+  actionType    String
+  actionDetails Json
+  status        String    @default("pending") // pending, success, failed
+  result        Json?
+  error         String?   @db.Text
+  createdAt     DateTime  @default(now())
+  executedAt    DateTime?
+  
+  promotion     ProductPromotion  @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  decision      PromotionDecision? @relation(fields: [decisionId], references: [id], onDelete: SetNull)
+  
+  @@index([promotionId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("promotion_action_logs")
+}
+
+model ProductAiChat {
+  id                    String   @id @default(cuid())
+  productId             String
+  userId                String
+  aiThreadId            String?  // ID Thread в OpenAI Assistants API
+  aiAssistantId         String   // ID Assistant (promotion или content)
+  chatType              String   // "promotion" | "content"
+  
+  // Метаданные чата
+  title                 String   // Название чата (например, "Оптимизация продвижения")
+  status                String   @default("ACTIVE") // ACTIVE, PAUSED, COMPLETED
+  lastMessageAt         DateTime?
+  
+  // Настройки бюджета и оптимизации
+  dailyBudget           Float    @default(0) // Дневной бюджет на продвижение
+  weeklyBudget          Float    @default(0) // Недельный бюджет на продвижение
+  startDate             DateTime // Дата начала оптимизации
+  endDate               DateTime // Дата окончания оптимизации
+  
+  // Метрики эффективности
+  totalSpent            Float    @default(0) // Всего потрачено на продвижение
+  totalRevenue          Float    @default(0) // Всего заработано за период
+  roi                   Float?   // ROI оптимизации
+  
+  // Связи
+  product               Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages              ProductAiMessage[]
+  
+  // Индексы
+  @@index([productId])
+  @@index([userId])
+  @@index([status])
+  @@index([chatType])
+  @@index([lastMessageAt])
+  @@map("product_ai_chats")
+}
+
+model ProductAiMessage {
+  id            String   @id @default(cuid())
+  chatId        String
+  role          String   // "user" | "assistant"
+  content       String   @db.Text
+  metadata      Json?    // Дополнительные данные (действия, рекомендации и т.д.)
+  createdAt     DateTime @default(now())
+  
+  // Связи
+  chat          ProductAiChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  
+  // Индексы
+  @@index([chatId])
+  @@index([createdAt])
+  @@map("product_ai_messages")
 }

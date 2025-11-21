@@ -93,6 +93,53 @@ body {
     }
 }
 
+/* Анимации для страницы загрузки */
+@keyframes float {
+    0%, 100% { 
+        transform: translateY(0px) translateX(0px); 
+    }
+    25% { 
+        transform: translateY(-20px) translateX(10px); 
+    }
+    50% { 
+        transform: translateY(-10px) translateX(-10px); 
+    }
+    75% { 
+        transform: translateY(-30px) translateX(5px); 
+    }
+}
+
+@keyframes spin-slow {
+    from { 
+        transform: rotate(0deg); 
+    }
+    to { 
+        transform: rotate(360deg); 
+    }
+}
+
+@keyframes gradient-x {
+    0%, 100% { 
+        background-position: 0% 50%; 
+    }
+    50% { 
+        background-position: 100% 50%; 
+    }
+}
+
+.animate-float {
+    animation: float 6s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+    animation: spin-slow 20s linear infinite;
+}
+
+.animate-gradient-x {
+    background-size: 200% 100%;
+    animation: gradient-x 3s ease infinite;
+}
+
 
 /* Анимированные фигуры (shapes) - из HTML */
 /* Шейпы БЕЗ blur - четкие и яркие */

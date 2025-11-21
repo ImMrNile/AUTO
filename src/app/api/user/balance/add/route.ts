@@ -1,6 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse } from 'next/server'
 import { AuthService } from '../../../../../../lib/auth/auth-service'
 import { prisma } from '../../../../../../lib/prisma'
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/user/balance/add

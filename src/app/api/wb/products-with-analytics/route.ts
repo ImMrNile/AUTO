@@ -1,4 +1,4 @@
-// src/app/api/wb/products-with-analytics/route.ts - Получение товаров с полной аналитикой + КЕШИРОВАНИЕ
+﻿// src/app/api/wb/products-with-analytics/route.ts - Получение товаров с полной аналитикой + КЕШИРОВАНИЕ
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
@@ -6,6 +6,9 @@ import { safePrismaOperation } from '../../../../../lib/prisma-utils';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { WB_API_CONFIG } from '../../../../../lib/config/wbApiConfig';
 import { WbProductQueriesService } from '../../../../../lib/services/wbProductQueriesService';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // НАСТРОЙКИ КЕШИРОВАНИЯ И RATE LIMITING
 const CACHE_CONFIG = {

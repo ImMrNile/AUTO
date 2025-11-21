@@ -1,7 +1,10 @@
-// src/app/api/wb/local-categories/route.ts - ПОЛНЫЙ API ENDPOINT
+﻿// src/app/api/wb/local-categories/route.ts - ПОЛНЫЙ API ENDPOINT
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // CORS заголовки
 const corsHeaders = {

@@ -1,10 +1,13 @@
-// src/app/api/analytics/conversion/route.ts - API для получения реальных данных конверсии из WB Analytics API
+﻿// src/app/api/analytics/conversion/route.ts - API для получения реальных данных конверсии из WB Analytics API
 
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { prismaAnalytics } from '../../../../../lib/prisma-analytics';
 import { safePrismaOperation } from '../../../../../lib/prisma-utils';
 import { WbConversionService } from '../../../../../lib/services/wbConversionService';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * GET - Получение данных о конверсии для дашборда

@@ -1,0 +1,17 @@
+{
+  "Просто токен": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"533bd68a0489b2ac757360889dc850a0\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:21:13Z\"\n}\r\n"
+  },
+  "Bearer + токен": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"f0c6cb548eb5124d09fcba7fb372f72b\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:21:14Z\"\n}\r\n"
+  },
+  "bearer + токен (lowercase)": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"access token problem; token is malformed: could not base64 decode header: illegal base64 data at input byte 6\",\n    \"code\": \"167251cb759b cc73ad3617b9d5c82732 84bd353bf-75\",\n    \"requestId\": \"0309e9f69e65c5944b77d5d19a79893e\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:21:15Z\"\n}\r\n"
+  }
+}

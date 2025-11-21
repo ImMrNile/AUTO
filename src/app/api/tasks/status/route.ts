@@ -1,7 +1,10 @@
-// API для проверки статуса фоновых задач
+﻿// API для проверки статуса фоновых задач
 import { NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { safePrismaOperation } from '../../../../../lib/prisma-utils';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // Тип для задачи из БД
 interface TaskWithProduct {
@@ -54,11 +57,11 @@ export async function GET() {
       return acc;
     }, {});
 
-    // Находим зависшие задачи (старше 10 минут и в статусе "в работе")
+    // Находим зависшие задачи (старше 20 минут и в статусе "в работе")
     const now = new Date();
     const stuckTasks = (tasks || []).filter((task: TaskWithProduct) => {
       const taskAge = now.getTime() - task.createdAt.getTime();
-      const isStuck = taskAge > 10 * 60 * 1000; // 10 минут
+      const isStuck = taskAge > 20 * 60 * 1000; // 20 минут
       const isInProgress = ['CREATING', 'ANALYZING', 'PUBLISHING'].includes(task.status);
       return isStuck && isInProgress;
     });

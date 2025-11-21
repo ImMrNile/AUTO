@@ -262,6 +262,13 @@ export class WbApiService {
         
         // Детальная обработка ошибок
         const formattedError = this.formatWBApiError(response.status, errorData, responseText);
+        
+        // Для 404 ошибок возвращаем объект ошибки как результат (не выбрасываем исключение)
+        if (response.status === 404 && typeof formattedError === 'object') {
+          console.log(`ℹ️ Возвращаем 404 ошибку как результат: ${JSON.stringify(formattedError)}`);
+          return formattedError;
+        }
+        
         throw new Error(formattedError);
       }
 
@@ -328,7 +335,7 @@ export class WbApiService {
   /**
    * Форматирование ошибок WB API
    */
-  private formatWBApiError(status: number, errorData: any, responseText: string): string {
+  private formatWBApiError(status: number, errorData: any, responseText: string): string | any {
     switch (status) {
       case 400:
         console.error('❌ Ошибка 400 - Неверные данные запроса:', errorData);
@@ -346,8 +353,15 @@ export class WbApiService {
         return `Недостаточно прав доступа: ${errorData?.detail || errorData?.message || 'Проверьте права токена'}`;
         
       case 404:
-        console.error('❌ Ресурс не найден WB API:', errorData);
-        return `Ресурс не найден: ${errorData?.detail || errorData?.message || 'Проверьте правильность запроса'}`;
+        console.warn('⚠️ Ресурс не найден WB API:', errorData);
+        // Для 404 не повторяем запрос и не выбрасываем ошибку - возвращаем как есть
+        return {
+          title: 'path not found',
+          detail: errorData?.detail || 'Resource not found',
+          code: errorData?.code || '404',
+          status: 404,
+          statusText: 'Not Found'
+        };
         
       case 409:
         console.error('❌ Конфликт данных WB API:', errorData);
@@ -1074,22 +1088,25 @@ private logWeightConversion(originalInput: any, finalWeight: number): void {
         errors.push('Цена со скидкой должна быть больше 0');
       }
       
-      if (priceInfo.discount >= priceInfo.original) {
-        errors.push('Цена со скидкой должна быть меньше оригинальной цены');
+      if (priceInfo.discount > priceInfo.original) {
+        errors.push('Цена со скидкой не может быть больше оригинальной цены');
       }
       
       if (!WBApiUtils.validatePrice(priceInfo.discount)) {
         errors.push(`Цена со скидкой вне допустимого диапазона: ${priceInfo.discount}`);
       }
       
-      const discountPercent = ((priceInfo.original - priceInfo.discount) / priceInfo.original) * 100;
-      
-      if (discountPercent > 90) {
-        warnings.push('Слишком большая скидка (более 90%) может вызвать подозрения у покупателей');
-      }
-      
-      if (discountPercent < 5) {
-        warnings.push('Слишком маленькая скидка (менее 5%) может быть незаметна для покупателей');
+      // Рассчитываем процент скидки только если есть скидка
+      if (priceInfo.discount < priceInfo.original) {
+        const discountPercent = ((priceInfo.original - priceInfo.discount) / priceInfo.original) * 100;
+        
+        if (discountPercent > 90) {
+          warnings.push('Слишком большая скидка (более 90%) может вызвать подозрения у покупателей');
+        }
+        
+        if (discountPercent < 5) {
+          warnings.push('Слишком маленькая скидка (менее 5%) может быть незаметна для покупателей');
+        }
       }
     }
     
@@ -1736,30 +1753,57 @@ private logWeightConversion(originalInput: any, finalWeight: number): void {
   ): Promise<WBApiResponse> {
     try {
       console.log(`💰 [WB Price] Установка цены для товара ${nmId}`);
-      console.log(`   - Цена: ${discountPrice}₽`);
-      if (originalPrice) {
-        console.log(`   - Оригинальная цена: ${originalPrice}₽`);
+      console.log(`   - Оригинальная цена: ${originalPrice}₽`);
+      console.log(`   - Цена со скидкой: ${discountPrice}₽`);
+      
+      // Проверяем наличие оригинальной цены
+      if (!originalPrice || originalPrice <= 0) {
+        console.error(`❌ [WB Price] Оригинальная цена не указана или некорректна`);
+        return {
+          success: false,
+          error: 'Оригинальная цена обязательна для установки цены'
+        };
       }
       
-      // Используем правильный endpoint для обновления цен
-      // Формат: { data: [{ nmID, price, discount }] }
+      // Проверяем что цена со скидкой не больше оригинальной
+      if (discountPrice > originalPrice) {
+        console.error(`❌ [WB Price] Цена со скидкой не может быть больше оригинальной`);
+        return {
+          success: false,
+          error: 'Цена со скидкой не может быть больше оригинальной цены'
+        };
+      }
+      
+      // ПРАВИЛЬНЫЙ ФОРМАТ согласно официальной документации WB:
+      // POST https://discounts-prices-api.wildberries.ru/api/v2/upload/task
+      // Body: { data: [{ nmID: number, price: number, discount: number }] }
+      // Документация: https://dev.wildberries.ru/en/openapi/work-with-products
+      
+      const discountPercent = Math.round(((originalPrice - discountPrice) / originalPrice) * 100);
+      
       const requestData = {
         data: [{
           nmID: nmId,
-          price: Math.round(discountPrice)
+          price: Math.round(originalPrice),  // Оригинальная цена (без скидки)
+          discount: discountPercent  // Процент скидки
         }]
       };
       
+      console.log(`   - Размер скидки: ${discountPercent}%`);
       console.log(`📤 [WB Price] Отправляем данные:`, requestData);
       console.log(`🌐 [WB Price] Endpoint: POST /api/v2/upload/task`);
+      console.log(`🏢 [WB Price] Base URL: discounts-prices-api.wildberries.ru`);
       
+      // Используем правильный endpoint согласно документации
       const response = await this.makeRequest(
         `/api/v2/upload/task`,
         apiToken,
         {
           method: 'POST',
           body: JSON.stringify(requestData)
-        }
+        },
+        0,
+        'https://discounts-prices-api.wildberries.ru' // Production API для цен
       );
       
       console.log(`✅ [WB Price] Цена успешно установлена для товара ${nmId}`);
@@ -1787,18 +1831,38 @@ private logWeightConversion(originalInput: any, finalWeight: number): void {
     discountPrice: number,
     maxRetries: number = 3,
     retryDelay: number = 5000,
-    vendorCode?: string
+    vendorCode?: string,
+    originalPrice?: number
   ): Promise<WBApiResponse> {
     let lastError: any = null;
+    
+    // Проверяем наличие оригинальной цены
+    if (!originalPrice || originalPrice <= 0) {
+      console.error(`❌ [WB Price] Оригинальная цена не указана для retry`);
+      return {
+        success: false,
+        error: 'Оригинальная цена обязательна для установки скидки'
+      };
+    }
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       console.log(`🔄 [WB Price] Попытка ${attempt}/${maxRetries} установки цены для товара ${nmId}`);
       
-      const result = await this.setProductDiscount(apiToken, nmId, discountPrice, undefined, vendorCode);
+      const result = await this.setProductDiscount(apiToken, nmId, discountPrice, originalPrice, vendorCode);
       
       if (result.success) {
         console.log(`✅ [WB Price] Цена успешно установлена с попытки ${attempt}`);
         return result;
+      }
+      
+      // Проверяем, если цена уже установлена - это тоже успех
+      if (result.error && typeof result.error === 'string' && 
+          result.error.includes('already set')) {
+        console.log(`ℹ️ [WB Price] Цена уже установлена на WB, пропускаем обновление`);
+        return {
+          success: true,
+          data: { alreadySet: true }
+        };
       }
       
       lastError = result.error;
@@ -1934,117 +1998,210 @@ private logWeightConversion(originalInput: any, finalWeight: number): void {
   }
 
   /**
-   * НОВАЯ ФУНКЦИЯ: Получение остатков товара
+   * НОВАЯ ФУНКЦИЯ: Получение остатков FBS со склада продавца
+   * Использует WB Marketplace API: POST /api/v3/stocks/{warehouseId}
+   * Документация: https://dev.wildberries.ru/openapi/work-with-products#tag/Ostatki-na-skladah-prodavca
+   * 
+   * @param apiToken - API токен WB
+   * @param warehouseId - ID склада продавца
+   * @param skus - Массив баркодов для получения остатков (обязательно!)
    */
-  async getProductStock(
-    apiToken: string,
-    warehouseId: number
-  ): Promise<WBApiResponse> {
+  async getFBSStocks(apiToken: string, warehouseId: number, skus: string[]): Promise<any[]> {
     try {
-      console.log(`📦 [WB Stocks] Получение остатков на складе ${warehouseId}...`);
+      // Проверяем, что переданы баркоды
+      if (!skus || skus.length === 0) {
+        console.warn(`⚠️ [WB FBS Stocks] Не переданы баркоды для склада ${warehouseId}`);
+        return [];
+      }
+
+      console.log(`📦 [WB FBS Stocks] Получение остатков FBS для склада ${warehouseId} (${skus.length} баркодов)...`);
       
       const response = await this.makeRequest(
         `/api/v3/stocks/${warehouseId}`,
         apiToken,
         {
-          method: 'GET'
-        }
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            skus: skus
+          })
+        },
+        0,
+        WB_API_CONFIG.BASE_URLS.MARKETPLACE
       );
       
-      console.log(`✅ [WB Stocks] Получены остатки: ${response?.stocks?.length || 0} позиций`);
+      const stocks = response?.stocks || [];
+      console.log(`✅ [WB FBS Stocks] Получены остатки для ${stocks.length} позиций`);
       
-      return {
-        success: true,
-        data: response
-      };
+      // Добавляем баркод в каждую запись для сопоставления
+      const stocksWithBarcodes = stocks.map((stock: any) => ({
+        ...stock,
+        barcode: stock.sku || stock.barcode,
+        nmId: stock.nmId || stock.nmID
+      }));
+      
+      return stocksWithBarcodes;
     } catch (error) {
-      console.error(`❌ [WB Stocks] Ошибка получения остатков:`, error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Неизвестная ошибка получения остатков'
-      };
+      console.error(`❌ [WB FBS Stocks] Ошибка получения остатков FBS:`, error);
+      return [];
     }
   }
 
   /**
-   * НОВАЯ ФУНКЦИЯ: Получение текущей цены товара с WB
+   * НОВАЯ ФУНКЦИЯ: Получение остатков товаров на складах с использованием баркодов (FBW + FBS)
+   * Комбинирует данные из Statistics API (FBW) и Marketplace API (FBS)
+   * 
+   * @param apiToken - API токен WB
+   * @param barcodes - Массив баркодов для получения FBS остатков
    */
-  async getProductPrice(
-    apiToken: string,
-    nmId: number
-  ): Promise<WBApiResponse> {
+  async getStocksWithBarcodes(apiToken: string, barcodes: string[] = []): Promise<any[]> {
     try {
-      console.log(`💰 [WB Price] Получение цены товара ${nmId}...`);
+      console.log(`📦 [WB Stocks] Получение остатков товаров (баркодов: ${barcodes.length})...`);
       
-      // Используем endpoint для получения информации о ценах
-      const response = await this.makeRequest(
-        `/public/api/v1/info?nm=${nmId}`,
-        apiToken,
-        {
-          method: 'GET'
-        }
-      );
+      const allStocks: any[] = [];
       
-      // Извлекаем цену из ответа
-      if (response && Array.isArray(response) && response.length > 0) {
-        const productInfo = response[0];
-        const price = productInfo.sizes?.[0]?.price || productInfo.price || 0;
+      // 1. Получаем остатки FBW из Statistics API
+      try {
+        const params = new URLSearchParams();
+        params.append('dateFrom', new Date().toISOString().split('T')[0]);
         
-        console.log(`✅ [WB Price] Получена цена товара ${nmId}: ${price}₽`);
+        const fbwResponse = await this.makeRequest(
+          `/api/v1/supplier/stocks?${params.toString()}`,
+          apiToken,
+          { method: 'GET' },
+          0,
+          WB_API_CONFIG.BASE_URLS.STATISTICS
+        );
         
-        return {
-          success: true,
-          data: {
-            nmId: nmId,
-            price: price,
-            rawData: productInfo
-          }
-        };
+        const fbwStocks = Array.isArray(fbwResponse) ? fbwResponse : (fbwResponse?.stocks || []);
+        console.log(`✅ [WB Stocks] FBW остатки: ${fbwStocks.length} позиций`);
+        allStocks.push(...fbwStocks);
+      } catch (error) {
+        console.error(`⚠️ [WB Stocks] Ошибка получения FBW остатков:`, error);
       }
       
-      console.warn(`⚠️ [WB Price] Не удалось получить цену товара ${nmId}`);
-      return {
-        success: false,
-        error: 'Товар не найден или нет данных о цене'
-      };
+      // 2. Получаем список FBS складов и остатки по баркодам
+      if (barcodes.length > 0) {
+        try {
+          const warehouses = await this.makeRequest(
+            '/api/v3/warehouses',
+            apiToken,
+            { method: 'GET' },
+            0,
+            WB_API_CONFIG.BASE_URLS.MARKETPLACE
+          );
+          
+          const fbsWarehouses = Array.isArray(warehouses) 
+            ? warehouses.filter((w: any) => w.deliveryType === 1)
+            : [];
+          
+          console.log(`📦 [WB Stocks] Найдено FBS складов: ${fbsWarehouses.length}`);
+          
+          // 3. Получаем остатки с каждого FBS склада
+          for (const warehouse of fbsWarehouses) {
+            try {
+              const fbsStocks = await this.getFBSStocks(apiToken, warehouse.id, barcodes);
+              
+              // Добавляем информацию о складе
+              const stocksWithWarehouse = fbsStocks.map((stock: any) => ({
+                ...stock,
+                warehouseId: warehouse.id,
+                warehouseName: warehouse.name,
+                warehouseType: 'FBS',
+                // Преобразуем формат для совместимости
+                nmId: stock.nmId || stock.nmID,
+                quantity: stock.amount || stock.quantity || 0,
+                quantityFull: stock.amount || stock.quantity || 0
+              }));
+              
+              allStocks.push(...stocksWithWarehouse);
+              console.log(`✅ [WB Stocks] FBS склад "${warehouse.name}": ${fbsStocks.length} позиций`);
+            } catch (error) {
+              console.warn(`⚠️ [WB Stocks] Ошибка получения остатков FBS склада ${warehouse.name}:`, error);
+            }
+          }
+        } catch (error) {
+          console.error(`⚠️ [WB Stocks] Ошибка получения списка складов:`, error);
+        }
+      } else {
+        console.warn(`⚠️ [WB Stocks] Баркоды не переданы, пропускаем получение FBS остатков`);
+      }
+      
+      console.log(`✅ [WB Stocks] Всего получено остатков: ${allStocks.length} позиций (FBW + FBS)`);
+      
+      return allStocks;
     } catch (error) {
-      console.error(`❌ [WB Price] Ошибка получения цены товара ${nmId}:`, error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Неизвестная ошибка получения цены'
-      };
+      console.error(`❌ [WB Stocks] Ошибка получения остатков:`, error);
+      return [];
     }
   }
 
   /**
-   * НОВАЯ ФУНКЦИЯ: Получение остатков товаров со складов
-   * Использует WB Marketplace API: GET /api/v3/stocks/{warehouseId}
-   * Документация: https://openapi.wildberries.ru/#tag/Ostatki
+   * УСТАРЕВШАЯ ФУНКЦИЯ: Получение остатков товаров на складах (FBW + FBS)
+   * Используйте getStocksWithBarcodes() для получения FBS остатков
+   * @deprecated Используйте getStocksWithBarcodes() вместо этого метода
    */
   async getStocks(apiToken: string, warehouseId?: number): Promise<any[]> {
     try {
       console.log(`📦 [WB Stocks] Получение остатков товаров${warehouseId ? ` для склада ${warehouseId}` : ''}...`);
       
-      // Если указан конкретный склад, используем endpoint с warehouseId
-      const endpoint = warehouseId 
-        ? `/api/v3/stocks/${warehouseId}`
-        : `/api/v3/stocks/0`; // 0 = все склады
+      const allStocks: any[] = [];
       
-      const response = await this.makeRequest(
-        endpoint,
-        apiToken,
-        {
-          method: 'GET'
-        },
-        0,
-        WB_API_CONFIG.BASE_URLS.MARKETPLACE // Используем Marketplace API
-      );
+      // 1. Получаем остатки FBW из Statistics API
+      try {
+        const params = new URLSearchParams();
+        params.append('dateFrom', new Date().toISOString().split('T')[0]);
+        
+        const fbwResponse = await this.makeRequest(
+          `/api/v1/supplier/stocks?${params.toString()}`,
+          apiToken,
+          { method: 'GET' },
+          0,
+          WB_API_CONFIG.BASE_URLS.STATISTICS
+        );
+        
+        const fbwStocks = Array.isArray(fbwResponse) ? fbwResponse : (fbwResponse?.stocks || []);
+        console.log(`✅ [WB Stocks] FBW остатки: ${fbwStocks.length} позиций`);
+        allStocks.push(...fbwStocks);
+      } catch (error) {
+        console.error(`⚠️ [WB Stocks] Ошибка получения FBW остатков:`, error);
+      }
       
-      // Ответ приходит в формате { stocks: [...] }
-      const stocks = response?.stocks || response || [];
-      console.log(`✅ [WB Stocks] Получены остатки для ${stocks.length || 0} позиций`);
+      // 2. Получаем список FBS складов
+      try {
+        const warehouses = await this.makeRequest(
+          '/api/v3/warehouses',
+          apiToken,
+          { method: 'GET' },
+          0,
+          WB_API_CONFIG.BASE_URLS.MARKETPLACE
+        );
+        
+        const fbsWarehouses = Array.isArray(warehouses) 
+          ? warehouses.filter((w: any) => w.deliveryType === 1)
+          : [];
+        
+        console.log(`📦 [WB Stocks] Найдено FBS складов: ${fbsWarehouses.length}`);
+        
+        // 3. Пропускаем FBS склады - для них нужны баркоды
+        // ВНИМАНИЕ: Для получения FBS остатков используйте getStocksWithBarcodes()
+        if (fbsWarehouses.length > 0) {
+          console.log(`⚠️ [WB Stocks] Пропущено ${fbsWarehouses.length} FBS складов - используйте getStocksWithBarcodes()`);
+        }
+      } catch (error) {
+        console.error(`⚠️ [WB Stocks] Ошибка получения FBS складов:`, error);
+      }
       
-      return stocks;
+      // Фильтруем по складу, если указан
+      const filteredStocks = warehouseId 
+        ? allStocks.filter((s: any) => s.warehouseId === warehouseId)
+        : allStocks;
+      
+      console.log(`✅ [WB Stocks] Всего получено остатков: ${filteredStocks.length} позиций (FBW + FBS)`);
+      
+      return filteredStocks;
     } catch (error) {
       console.error(`❌ [WB Stocks] Ошибка получения остатков:`, error);
       return [];
@@ -2093,7 +2250,235 @@ private logWeightConversion(originalInput: any, finalWeight: number): void {
   }
 
   /**
-   * НОВАЯ ФУНКЦИЯ: Получение заказов за период
+   * Установка цены товара по nmId с повторными попытками
+   * Использует WB API: POST /api/v2/upload/task
+   * Устанавливает фиксированную цену без скидки
+   */
+  async setProductPriceWithRetry(
+    apiToken: string,
+    nmId: number,
+    newPrice: number,
+    maxRetries: number = 3,
+    retryDelay: number = 5000,
+    vendorCode?: string
+  ): Promise<WBApiResponse> {
+    let lastError: any = null;
+
+    // WB API требует целое число для цены
+    const roundedPrice = Math.round(newPrice);
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      console.log(`💰 [WB Price] Попытка ${attempt}/${maxRetries} установки цены для товара ${nmId}: ${newPrice}₽ (округлено до ${roundedPrice}₽)`);
+
+      try {
+        const response = await this.makeRequest(
+          '/api/v2/upload/task',
+          apiToken,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              data: [{
+                nmID: nmId,
+                price: roundedPrice,
+                discount: 0
+              }]
+            })
+          },
+          0,
+          WB_API_CONFIG.BASE_URLS.PRICES
+        );
+
+        if (response && response.data && response.data.id) {
+          console.log(`✅ [WB Price] Цена успешно установлена для товара ${nmId}, task ID: ${response.data.id}`);
+          return {
+            success: true,
+            data: response.data
+          };
+        } else {
+          throw new Error(`Неожиданный ответ от API: ${JSON.stringify(response)}`);
+        }
+      } catch (error) {
+        lastError = error;
+
+        // Проверяем на ошибки лимитов
+        const isRateLimit = error instanceof Error && (
+          error.message.includes('429') ||
+          error.message.includes('too many requests') ||
+          error.message.includes('Превышен лимит')
+        );
+
+        if (isRateLimit) {
+          console.log(`⚠️ [WB Price] Лимит API достигнут, попытка ${attempt}/${maxRetries}`);
+        } else {
+          console.error(`❌ [WB Price] Ошибка установки цены для товара ${nmId}:`, error);
+        }
+
+        // Если это не последняя попытка, ждем перед повтором
+        if (attempt < maxRetries) {
+          console.log(`⏳ [WB Price] Ожидание ${retryDelay}мс перед повторной попыткой...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          retryDelay *= 1.5; // Увеличиваем задержку с каждой попыткой
+        }
+      }
+    }
+
+    console.error(`❌ [WB Price] Не удалось установить цену после ${maxRetries} попыток`);
+    return {
+      success: false,
+      error: `Не удалось установить цену после ${maxRetries} попыток. Последняя ошибка: ${lastError instanceof Error ? lastError.message : lastError}`
+    };
+  }
+
+  /**
+   * УСТАРЕВШИЙ МЕТОД: Установка скидки товара (не рекомендуется использовать)
+   * @deprecated Используйте setProductPriceWithRetry для установки фиксированной цены
+   */
+  async getProductPrice(apiToken: string, nmId: number): Promise<{ success: boolean; data?: { price: number; discountPrice?: number }; error?: string }> {
+    try {
+      console.log(`💰 Получение цены товара ${nmId}...`);
+
+      // Используем nmList вместо nmID для совместимости с API
+      const params = new URLSearchParams({
+        limit: '1000'
+      });
+
+      const response = await this.makeRequest(
+        `/api/v2/list/goods/filter?${params.toString()}`,
+        apiToken,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            nmList: [nmId]
+          })
+        },
+        0,
+        WB_API_CONFIG.BASE_URLS.PRICES
+      );
+
+      // Проверяем структуру ответа
+      if (response && response.data && Array.isArray(response.data.listGoods)) {
+        if (response.data.listGoods.length > 0) {
+          const product = response.data.listGoods[0];
+          // Цена находится в массиве sizes
+          if (product.sizes && Array.isArray(product.sizes) && product.sizes.length > 0) {
+            const size = product.sizes[0];
+            if (size.price && typeof size.price === 'number') {
+              console.log(`✅ Цена товара ${nmId}: ${size.price}₽`);
+              return {
+                success: true,
+                data: {
+                  price: size.price,
+                  discountPrice: size.discountedPrice || size.price
+                }
+              };
+            }
+          }
+          console.warn(`⚠️ Не удалось получить цену для товара ${nmId} - цена не установлена`);
+          return {
+            success: false,
+            error: 'Цена не установлена'
+          };
+        } else {
+          // Массив пустой - товар не найден
+          console.warn(`⚠️ Товар ${nmId} не найден в WB (пустой массив товаров)`);
+          return {
+            success: false,
+            error: 'Товар не найден в Wildberries'
+          };
+        }
+      }
+      
+      console.warn(`⚠️ Неожиданная структура ответа от WB API`);
+      return {
+        success: false,
+        error: 'Неожиданная структура ответа от API'
+      };
+    } catch (error) {
+      console.error(`❌ Ошибка получения цены товара ${nmId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+      };
+    }
+  }
+
+  /**
+   * Получение остатков товара по nmId
+   * Теперь используем Statistics API /api/v1/supplier/stocks вместо устаревшего /api/v3/stocks
+   */
+  async getProductStock(apiToken: string, nmId: number): Promise<{ success: boolean; data?: { wbStocks: Array<{ amount: number; warehouseName: string; warehouseId: number }> }; error?: string }> {
+    try {
+      console.log(`📦 Получение остатков товара ${nmId}...`);
+
+      // Используем Statistics API для получения остатков
+      const params = new URLSearchParams({
+        dateFrom: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], // За последние 24 часа
+        take: '1000',
+        skip: '0'
+      });
+
+      const response = await this.makeRequest(
+        `/api/v1/supplier/stocks?${params.toString()}`,
+        apiToken,
+        {
+          method: 'GET'
+        },
+        0,
+        WB_API_CONFIG.BASE_URLS.STATISTICS
+      );
+
+      if (response && Array.isArray(response)) {
+        // Фильтруем остатки по нашему nmId
+        const productStocks = response.filter((stock: any) => stock.nmId === nmId);
+
+        if (productStocks.length > 0) {
+          const wbStocks = productStocks.map((stock: any) => ({
+            amount: stock.quantity || 0,
+            warehouseName: stock.warehouseName || `Склад ${stock.warehouseId}`,
+            warehouseId: stock.warehouseId || 0
+          }));
+
+          console.log(`✅ Остатки товара ${nmId}: ${wbStocks.length} складов, всего: ${wbStocks.reduce((sum, s) => sum + s.amount, 0)}`);
+          return {
+            success: true,
+            data: { wbStocks }
+          };
+        }
+      }
+      
+      // Проверяем на 404 ошибку (товар не найден)
+      if (response && response.status === 404) {
+        console.warn(`⚠️ Товар ${nmId} не найден в WB API (404)`);
+        return {
+          success: false,
+          error: 'Товар не найден в Wildberries'
+        };
+      }
+
+      console.warn(`⚠️ Не удалось получить остатки для товара ${nmId} - товар не найден или нет остатков`);
+      return {
+        success: false,
+        error: 'Остатки не найдены'
+      };
+    } catch (error) {
+      console.error(`❌ Ошибка получения остатков товара ${nmId}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Неизвестная ошибка'
+      };
+    }
+  }
+
+  /**
+   * Получение заказов за период
+   * Использует WB Statistics API: GET /api/v1/supplier/orders
+   * Документация: https://openapi.wildberries.ru/#tag/Statistika
    */
   async getOrders(
     apiToken: string,
@@ -2106,21 +2491,26 @@ private logWeightConversion(originalInput: any, finalWeight: number): void {
     try {
       console.log(`📋 [WB Orders] Получение заказов за период: ${options.dateFrom} - ${options.dateTo}`);
       
+      // Используем правильный формат даты для Statistics API
       const params = new URLSearchParams();
       if (options.dateFrom) params.append('dateFrom', options.dateFrom);
-      if (options.dateTo) params.append('dateTo', options.dateTo);
       if (options.limit) params.append('limit', options.limit.toString());
       
+      // Используем Statistics API вместо устаревшего v2
       const response = await this.makeRequest(
-        `/api/v2/orders?${params.toString()}`,
+        `/api/v1/supplier/orders?${params.toString()}`,
         apiToken,
         {
           method: 'GET'
-        }
+        },
+        0,
+        WB_API_CONFIG.BASE_URLS.STATISTICS // Используем Statistics API
       );
       
-      console.log(`✅ [WB Orders] Получено заказов: ${response?.orders?.length || 0}`);
-      return response || { orders: [] };
+      // Ответ приходит как массив заказов
+      const orders = Array.isArray(response) ? response : (response?.orders || []);
+      console.log(`✅ [WB Orders] Получено заказов: ${orders.length}`);
+      return { orders };
     } catch (error) {
       console.error(`❌ [WB Orders] Ошибка получения заказов:`, error);
       return { orders: [] };

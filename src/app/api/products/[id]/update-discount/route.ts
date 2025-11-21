@@ -5,6 +5,9 @@ import { prisma } from '../../../../../../lib/prisma';
 import { AuthService } from '../../../../../../lib/auth/auth-service';
 import { wbApiService } from '../../../../../../lib/services/wbApiService';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 /**
  * PATCH - Обновление скидки товара (процент скидки)
  * Обновляет скидку в БД и синхронизирует с Wildberries
@@ -91,7 +94,9 @@ export async function PATCH(
         id: existingProduct.id
       },
       data: {
-        price: discountPrice,
+        price: originalPrice, // Базовая цена остается неизменной
+        discountPrice: discountPrice, // Обновляем цену со скидкой
+        discount: discount, // Обновляем процент скидки
         wbData: updatedWbData
       }
     });
@@ -102,19 +107,58 @@ export async function PATCH(
     let wbSyncResult = null;
     if (existingProduct.wbNmId) {
       console.log(`🔄 Синхронизация скидки с Wildberries для товара ${existingProduct.wbNmId}...`);
-
+      console.log(`📋 Доступно кабинетов: ${existingProduct.productCabinets.length}`);
+      
       // Получаем кабинет
-      const productCabinet = existingProduct.productCabinets.find(pc => pc.cabinet !== null);
-      if (productCabinet && productCabinet.cabinet) {
+      let productCabinet = existingProduct.productCabinets.find(pc => pc.cabinet !== null && pc.cabinet !== undefined);
+      
+      // Если нет связи через productCabinets, пытаемся найти кабинет пользователя напрямую
+      if (!productCabinet || !productCabinet.cabinet) {
+        console.log(`⚠️ Кабинет не найден через productCabinets, ищем кабинет пользователя...`);
+        
+        const userCabinet = await prisma.cabinet.findFirst({
+          where: {
+            userId: user.id,
+            isActive: true
+          }
+        });
+        
+        if (userCabinet) {
+          console.log(`✅ Найден активный кабинет пользователя: ${userCabinet.name}`);
+          productCabinet = {
+            id: 'temp',
+            productId: existingProduct.id,
+            cabinetId: userCabinet.id,
+            isSelected: true,
+            createdAt: new Date(),
+            cabinet: userCabinet
+          } as any;
+        } else {
+          console.warn(`⚠️ Пропускаем синхронизацию с WB: не найден активный кабинет пользователя`);
+        }
+      }
+      
+      if (!productCabinet || !productCabinet.cabinet) {
+        console.warn(`⚠️ Пропускаем синхронизацию с WB: кабинет не найден`);
+        if (existingProduct.productCabinets.length > 0) {
+          console.log(`   Доступные связи:`, existingProduct.productCabinets.map(pc => ({
+            id: pc.id,
+            cabinetId: pc.cabinetId,
+            hasCabinet: !!pc.cabinet
+          })));
+        }
+      } else {
         const cabinet = productCabinet.cabinet;
         const apiToken = cabinet.apiToken;
         const nmId = existingProduct.wbNmId;
+
+        console.log(`✅ Найден кабинет: ${cabinet.name} (ID: ${cabinet.id})`);
 
         if (apiToken && nmId) {
           try {
             console.log(`📤 Отправка запроса на установку скидки ${discount}% (цена ${discountPrice}₽) для товара ${nmId}...`);
             
-            wbSyncResult = await wbApiService.setProductDiscountWithRetry(
+            wbSyncResult = await wbApiService.setProductPriceWithRetry(
               apiToken,
               parseInt(nmId),
               discountPrice,
@@ -149,9 +193,8 @@ export async function PATCH(
           }
         } else {
           console.warn(`⚠️ Пропускаем синхронизацию с WB: отсутствует API токен или nmId`);
+          console.log(`   API Token: ${apiToken ? 'есть' : 'нет'}, nmId: ${nmId || 'нет'}`);
         }
-      } else {
-        console.warn(`⚠️ Пропускаем синхронизацию с WB: кабинет не найден`);
       }
     } else {
       console.log(`ℹ️ Пропускаем синхронизацию с WB: товар не имеет wbNmId (не опубликован на WB)`);

@@ -1,7 +1,10 @@
-// src/app/api/wb-proxy/route.ts - Прокси для безопасной работы с WB API
+﻿// src/app/api/wb-proxy/route.ts - Прокси для безопасной работы с WB API
 
 import { NextRequest, NextResponse } from 'next/server';
 import { WB_API_CONFIG } from '../../../../lib/config/wbApiConfig';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // Простой кеш в памяти для категорий и справочников
 const cache = new Map<string, { data: any; timestamp: number; ttl: number }>();

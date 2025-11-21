@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useOptimizedPolling } from '@/app/hooks/useOptimizedPolling';
 
 /**
  * Кнопка для принудительного сброса зависших фоновых задач
- * Появляется только когда есть задачи старше 10 минут в статусе "в работе"
+ * Появляется только когда есть задачи старше 20 минут в статусе "в работе"
  */
 export default function TaskResetButton() {
   const [isLoading, setIsLoading] = useState(false);
@@ -13,33 +14,38 @@ export default function TaskResetButton() {
   const [isVisible, setIsVisible] = useState(false);
 
   // Проверяем наличие зависших задач при монтировании и периодически
-  useEffect(() => {
-    const checkStuckTasks = async () => {
-      try {
-        const response = await fetch('/api/tasks/status');
-        const data = await response.json();
-        
-        if (data.status === 'success' && data.stuckTasks && data.stuckTasks.length > 0) {
-          setStuckTasks(data.stuckTasks);
-          setIsVisible(true);
-        } else {
-          setStuckTasks([]);
-          setIsVisible(false);
-        }
-      } catch (error) {
-        console.error('Ошибка проверки зависших задач:', error);
+  const checkStuckTasks = async () => {
+    try {
+      const response = await fetch('/api/tasks/status');
+      const data = await response.json();
+      
+      if (data.status === 'success' && data.stuckTasks && data.stuckTasks.length > 0) {
+        setStuckTasks(data.stuckTasks);
+        setIsVisible(true);
+      } else {
+        setStuckTasks([]);
         setIsVisible(false);
       }
-    };
+    } catch (error) {
+      console.error('Ошибка проверки зависших задач:', error);
+      setIsVisible(false);
+    }
+  };
 
-    // Проверяем сразу
+  // Проверяем сразу при монтировании
+  useEffect(() => {
     checkStuckTasks();
-
-    // Проверяем каждые 30 секунд
-    const interval = setInterval(checkStuckTasks, 30000);
-
-    return () => clearInterval(interval);
   }, []);
+
+  // ✅ ОПТИМИЗИРОВАНО: Используем оптимизированный polling
+  // Проверяем каждые 60 секунд (увеличено с 30 для снижения нагрузки)
+  useOptimizedPolling({
+    baseInterval: 60000, // 60 секунд
+    onPoll: checkStuckTasks,
+    enabled: true,
+    pauseWhenHidden: true,
+    immediate: false
+  });
 
   const handleResetTasks = async () => {
     if (!confirm('Вы уверены, что хотите сбросить все зависшие задачи? Это прервет их выполнение.')) {
@@ -98,7 +104,7 @@ export default function TaskResetButton() {
               Обнаружены зависшие задачи
             </h3>
             <p className="text-xs text-red-700 mb-3">
-              Найдено {stuckTasks.length} задач, которые не обновлялись более 10 минут
+              Найдено {stuckTasks.length} задач, которые не обновлялись более 20 минут
             </p>
             {stuckTasks.length > 0 && (
               <div className="mb-3 space-y-1">

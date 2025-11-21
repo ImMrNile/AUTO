@@ -1,0 +1,41 @@
+{
+  "campaignId": 27673276,
+  "nmId": 356956444,
+  "tests": {
+    "campaignInfo": {
+      "success": false,
+      "status": 401,
+      "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"2da21a230256055eb24c380cf60159d5\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:11:54Z\"\n}\r\n"
+    },
+    "v3fullstats": {
+      "success": false,
+      "status": 401,
+      "period": "2025-10-07 - 2025-11-06",
+      "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"8b765d45c8774ba8bbbdafcee413c37c\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:11:56Z\"\n}\r\n"
+    },
+    "allCampaigns": {
+      "success": false,
+      "status": 401,
+      "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"6fb81f0e9f8393dbcb8bd0a22e9a35f5\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:11:57Z\"\n}\r\n"
+    },
+    "v2fullstats": {
+      "success": false,
+      "status": 401,
+      "period": "2025-10-07 - 2025-11-06",
+      "datesCount": 31,
+      "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"ffe196f3be4197ff404b25d497f3e6eb\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:11:58Z\"\n}\r\n"
+    },
+    "keywords": {
+      "success": false,
+      "status": 401,
+      "period": "2025-10-31 - 2025-11-06",
+      "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"9e20a702bc00c9973bf044e3aedf22aa\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:12:00Z\"\n}\r\n"
+    },
+    "keywordsHistorical": {
+      "success": false,
+      "status": 401,
+      "period": "2025-08-11 - 2025-08-17",
+      "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"a9d9d4190db785a30dcf6983ce9d2ba9\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:12:02Z\"\n}\r\n"
+    }
+  }
+}

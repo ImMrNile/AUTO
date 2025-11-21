@@ -7,6 +7,48 @@ import { uploadService } from '@/lib/services/uploadService';
 import { AuthService } from '@/lib/auth/auth-service';
 import { UnifiedAISystem } from '@/lib/services/unifiedAISystem';
 import { UserWbTokenService } from '@/lib/services/userWbTokenService';
+import { deleteCached } from '@/lib/cache/redis';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
+// GET метод для получения списка товаров
+export async function GET(request: NextRequest) {
+  try {
+    const user = await AuthService.getCurrentUser();
+    if (!user?.id) {
+      return NextResponse.json({ error: 'Не авторизован' }, { status: 401 });
+    }
+
+    const products = await prisma.product.findMany({
+      where: {
+        userId: user.id
+      },
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        discountPrice: true,
+        wbNmId: true,
+        status: true,
+        originalImage: true,
+        createdAt: true,
+        updatedAt: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    return NextResponse.json(products);
+  } catch (error) {
+    console.error('Ошибка получения товаров:', error);
+    return NextResponse.json(
+      { error: 'Ошибка получения товаров' },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -256,7 +298,9 @@ export async function POST(request: NextRequest) {
       () => prisma.product.create({
         data: {
           name: productData.name,
-          price: parseFloat(productData.discountPrice),
+          price: parseFloat(productData.originalPrice), // Цена без скидки
+          discountPrice: parseFloat(productData.discountPrice), // Цена со скидкой
+          costPrice: productData.costPrice ? parseFloat(productData.costPrice) : null, // Себестоимость
           status: 'DRAFT',
           originalImage: mainImageUrl,
           referenceUrl: productData.referenceUrl || null,
@@ -264,7 +308,7 @@ export async function POST(request: NextRequest) {
             length: productData.dimensions.length,
             width: productData.dimensions.width,
             height: productData.dimensions.height,
-            weight: productData.dimensions.weight * 1000 // Переводим в граммы
+            weight: productData.dimensions.weight // Вес в кг (без конвертации)
           },
           workflowId: `unified-ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           processingMethod: 'unified_ai_system_v3_gpt5',
@@ -281,7 +325,12 @@ export async function POST(request: NextRequest) {
             costPrice: productData.costPrice ? parseFloat(productData.costPrice) : null,
             categoryId: parseInt(productData.categoryId), // Оставляем исходный wbSubjectId для совместимости
             categoryName: productData.categoryName,
-            parentCategoryName: productData.parentCategoryName
+            parentCategoryName: productData.parentCategoryName,
+            // 📸 СОХРАНЯЕМ ВСЕ ФОТОГРАФИИ
+            images: {
+              main: mainImageUrl,
+              additional: additionalImageUrls.filter((url): url is string => url !== null)
+            }
           },
           userId: user.id,
           subcategoryId: correctCategoryId // Используем правильный ID для связи с характеристиками
@@ -586,6 +635,11 @@ export async function POST(request: NextRequest) {
         }
       };
     }
+
+    // ============ ИНВАЛИДАЦИЯ КЕША ============
+    const cacheKey = `products:${user.id}:all`;
+    await deleteCached(cacheKey);
+    console.log(`🗑️ Кеш товаров инвалидирован после создания товара`);
 
     return NextResponse.json(responseData);
 

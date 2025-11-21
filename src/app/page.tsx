@@ -1,22 +1,32 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { Plus, Package, Users, BarChart3, User, Loader2, Clock, TrendingUp } from 'lucide-react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 
-// Импортируем существующие компоненты
-import SinglePageProductForm from './components/ProductForm/SinglePageProductForm';
-import AccountManager from './components/AccountManager';
-import ProductsWithAnalytics from './components/ProductsWithAnalytics';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
-import PromotionDashboard from './components/PromotionDashboard';
-import InProgressProducts from './components/InProgressProducts';
+// Динамический импорт компонентов для оптимизации
+const SinglePageProductForm = lazy(() => import('./components/ProductForm/SinglePageProductForm'));
+const AccountManager = lazy(() => import('./components/shared/AccountManager'));
+const ProductsWithAnalytics = lazy(() => import('./components/products').then(mod => ({ default: mod.ProductsWithAnalytics })));
+const InProgressProducts = lazy(() => import('./components/products').then(mod => ({ default: mod.InProgressProducts })));
+const AnalyticsDashboard = lazy(() => import('./components/analytics').then(mod => ({ default: mod.AnalyticsDashboard })));
+
+// Статический импорт только для критичных компонентов
 import TaskNotifications from './components/BackgroundTasks/TaskNotifications';
 import TaskResetButton from './components/BackgroundTasks/TaskResetButton';
-import CabinetSwitcher from './components/CabinetSwitcher';
+import { CabinetSwitcher } from './components/layout';
 import { useBackgroundTasks } from './components/BackgroundTasks/useBackgroundTasks';
 
 type Tab = 'upload' | 'in-progress' | 'products' | 'analytics' | 'account';
+
+// Компонент загрузки для Suspense
+function LoadingSpinner() {
+  return (
+    <div className="flex items-center justify-center py-12">
+      <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
+    </div>
+  );
+}
 
 // Анимированный фон теперь в layout.tsx - убираем дублирование
 
@@ -26,6 +36,7 @@ export default function HomePage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('upload');
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [selectedCabinet, setSelectedCabinet] = useState<string | null>(null);
   
@@ -34,8 +45,13 @@ export default function HomePage() {
 
   // Инициализация: загружаем пользователя и кабинеты
   useEffect(() => {
+    let isMounted = true;
+    
     const initialize = async () => {
       try {
+        // Очищаем старый флаг редиректа (если остался)
+        sessionStorage.removeItem('redirectingToOnboarding');
+        
         console.log('🚀 Инициализация приложения...');
         
         // 1. Проверяем сессию пользователя
@@ -44,6 +60,9 @@ export default function HomePage() {
           throw new Error('Ошибка загрузки сессии');
         }
         const sessionData = await sessionResponse.json();
+        
+        if (!isMounted) return;
+        
         console.log('✅ Пользователь загружен:', sessionData.user?.email);
         
         // 2. Загружаем кабинеты (без кеша для получения свежих данных)
@@ -54,6 +73,9 @@ export default function HomePage() {
           throw new Error('Ошибка загрузки кабинетов');
         }
         const cabinetsData = await cabinetsResponse.json();
+        
+        if (!isMounted) return;
+        
         console.log('📦 Ответ API кабинетов:', JSON.stringify(cabinetsData, null, 2));
         const cabinets = cabinetsData.data?.cabinets || cabinetsData.cabinets || [];
         console.log('✅ Кабинеты загружены:', cabinets.length, 'кабинетов');
@@ -66,22 +88,36 @@ export default function HomePage() {
           console.log('✅ Кабинет только что добавлен, пропускаем проверку');
         } else if (cabinets.length === 0) {
           console.log('⚠️ У пользователя нет кабинетов, редирект на /onboarding');
-          router.push('/onboarding');
+          
+          // Устанавливаем флаг редиректа
+          sessionStorage.setItem('redirectingToOnboarding', 'true');
+          setIsRedirecting(true);
+          
+          // Используем жесткий редирект
+          window.location.href = '/onboarding';
           return;
         }
+        
+        if (!isMounted) return;
         
         // 4. Инициализация завершена
         setIsInitialized(true);
         console.log('✅ Инициализация завершена - можно загружать товары и аналитику');
       } catch (error: any) {
         console.error('❌ Ошибка инициализации:', error);
-        setInitError(error.message);
-        setIsInitialized(true); // Всё равно разрешаем загрузку
+        if (isMounted) {
+          setInitError(error.message);
+          setIsInitialized(true); // Всё равно разрешаем загрузку
+        }
       }
     };
     
     initialize();
-  }, []);
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [router]);
 
   useEffect(() => {
     const tab = searchParams?.get('tab') as Tab;
@@ -145,27 +181,24 @@ export default function HomePage() {
   ];
 
   // Показываем загрузку пока не инициализировано
-  if (!isInitialized) {
+  if (!isInitialized || isRedirecting) {
     return (
-      <div className="min-h-screen relative z-10 flex items-center justify-center">
-        <div className="liquid-glass rounded-3xl p-12 text-center max-w-md">
-          <Loader2 className="w-16 h-16 mx-auto mb-6 text-purple-600 animate-spin" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-3">
-            Загрузка приложения...
-          </h2>
-          <p className="text-gray-600 mb-6">
-            Проверяем сессию и загружаем кабинеты
-          </p>
-          <div className="space-y-2 text-sm text-gray-500">
-            <div className="flex items-center justify-center gap-2">
-              <div className="w-2 h-2 bg-purple-600 rounded-full animate-pulse" />
-              <span>Загрузка данных пользователя</span>
-            </div>
-            <div className="flex items-center justify-center gap-2">
-              <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }} />
-              <span>Загрузка кабинетов WB</span>
-            </div>
+      <div className="min-h-screen relative z-10 flex items-center justify-center px-4">
+        <div className="bg-white rounded-2xl md:rounded-3xl p-8 md:p-12 shadow-xl border border-gray-200 text-center max-w-md w-full">
+          {/* Круглый спиннер */}
+          <div className="relative inline-flex items-center justify-center mb-6">
+            <Loader2 className="w-16 h-16 md:w-20 md:h-20 text-purple-600 animate-spin" />
           </div>
+          
+          {/* Текст с анимированными точками */}
+          <h2 className="text-xl md:text-2xl font-bold text-gray-900">
+            Загрузка
+            <span className="inline-flex ml-1">
+              <span className="animate-pulse" style={{ animationDelay: '0s' }}>.</span>
+              <span className="animate-pulse" style={{ animationDelay: '0.2s' }}>.</span>
+              <span className="animate-pulse" style={{ animationDelay: '0.4s' }}>.</span>
+            </span>
+          </h2>
         </div>
       </div>
     );
@@ -176,14 +209,14 @@ export default function HomePage() {
       <div className="min-h-screen relative z-10 pb-20 md:pb-6">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 md:py-6">
           {/* Верхняя панель для мобильных - только кабинеты */}
-          <div className="md:hidden mb-4 scale-in relative z-10">
+          <div className="md:hidden mb-4 scale-in">
             <CabinetSwitcher onCabinetChange={setSelectedCabinet} />
           </div>
 
           {/* Десктопная версия - кабинет и навигация сверху */}
           <div className="hidden md:block">
             {/* Переключатель кабинетов и уведомления о задачах */}
-            <div className="mb-6 scale-in relative z-10 flex items-start gap-4">
+            <div className="mb-6 scale-in flex items-start gap-4">
               <div className="flex-1">
                 <CabinetSwitcher onCabinetChange={setSelectedCabinet} />
               </div>
@@ -222,38 +255,43 @@ export default function HomePage() {
             </aside>
           </div>
 
-          {/* Контент - используем display: none вместо условного рендеринга */}
-          <div style={{ display: activeTab === 'upload' ? 'block' : 'none' }}>
-            <SinglePageProductForm 
-              cabinetId={selectedCabinet}
-              onSuccess={loadStats}
-              onTaskStart={(productName: string) => addTask(productName)}
-              onTaskUpdate={(taskId: string, updates: any) => updateTask(taskId, updates)}
-              onTaskComplete={(taskId: string, productId?: string) => completeTask(taskId, productId)}
-              onTaskError={(taskId: string, error: string) => errorTask(taskId, error)}
-            />
-          </div>
+          {/* Контент - используем условный рендеринг с Suspense для lazy loading */}
+          {activeTab === 'upload' && (
+            <Suspense fallback={<LoadingSpinner />}>
+              <SinglePageProductForm 
+                cabinetId={selectedCabinet}
+                onSuccess={loadStats}
+                onTaskStart={(productName: string) => addTask(productName)}
+                onTaskUpdate={(taskId: string, updates: any) => updateTask(taskId, updates)}
+                onTaskComplete={(taskId: string, productId?: string) => completeTask(taskId, productId)}
+                onTaskError={(taskId: string, error: string) => errorTask(taskId, error)}
+              />
+            </Suspense>
+          )}
 
-          <div style={{ display: activeTab === 'in-progress' ? 'block' : 'none' }} className="fade-in">
-            {/* Показываем полноценный компонент на всех устройствах */}
-            <InProgressProducts cabinetId={selectedCabinet} />
-          </div>
+          {activeTab === 'in-progress' && (
+            <Suspense fallback={<LoadingSpinner />}>
+              <InProgressProducts cabinetId={selectedCabinet} />
+            </Suspense>
+          )}
 
-          <div style={{ display: activeTab === 'products' ? 'block' : 'none' }} className="fade-in">
-            {isInitialized && <ProductsWithAnalytics cabinetId={selectedCabinet} />}
-          </div>
+          {activeTab === 'products' && isInitialized && (
+            <Suspense fallback={<LoadingSpinner />}>
+              <ProductsWithAnalytics cabinetId={selectedCabinet} />
+            </Suspense>
+          )}
 
-          <div style={{ display: activeTab === 'analytics' ? 'block' : 'none' }} className="fade-in">
-            {isInitialized && <AnalyticsDashboard cabinetId={selectedCabinet} />}
-          </div>
+          {activeTab === 'analytics' && isInitialized && (
+            <Suspense fallback={<LoadingSpinner />}>
+              <AnalyticsDashboard cabinetId={selectedCabinet} />
+            </Suspense>
+          )}
 
-          {/* <div style={{ display: activeTab === 'promotion' ? 'block' : 'none' }} className="fade-in">
-            {isInitialized && <PromotionDashboard cabinetId={selectedCabinet} />}
-          </div> */}
-
-          <div style={{ display: activeTab === 'account' ? 'block' : 'none' }} className="fade-in">
-            <AccountManager />
-          </div>
+          {activeTab === 'account' && (
+            <Suspense fallback={<LoadingSpinner />}>
+              <AccountManager />
+            </Suspense>
+          )}
         </div>
       </div>
       

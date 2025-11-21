@@ -359,7 +359,7 @@ export default function RegisterPage() {
             type="button"
             onClick={handleTelegramLogin}
             disabled={telegramLoading}
-            className="w-full py-3 bg-white/80 border-2 border-gray-300 hover:border-blue-400 text-gray-900 font-semibold rounded-xl transition-all flex items-center justify-center gap-2 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-3 bg-[#0088cc] hover:bg-[#0077b3] text-white font-semibold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.16.16-.295.295-.605.295-.042 0-.084 0-.127-.01l.214-3.053 5.56-5.023c.242-.213-.054-.328-.373-.115l-6.869 4.332-2.96-.924c-.643-.204-.658-.643.135-.953l11.566-4.458c.54-.203 1.01.122.84.953z" />

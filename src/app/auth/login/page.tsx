@@ -3,13 +3,13 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '../../components/AuthProvider';
+import { useAuth } from '../../components/Auth';
 import { AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('loginjon90@gmail.com');
-  const [password, setPassword] = useState('919014095@Man');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -27,7 +27,8 @@ export default function LoginPage() {
     }
   }, []);
 
-  // Инициализируем Telegram Web App и очищаем невалидный токен
+
+  // Инициализируем Telegram Web App и автоматически авторизуем пользователя
   useEffect(() => {
     // Очищаем невалидный токен сессии если он есть
     const clearInvalidToken = async () => {
@@ -42,24 +43,86 @@ export default function LoginPage() {
           await fetch('/api/auth/logout', { method: 'POST' });
           console.log('✅ Cookie очищен');
         } else {
-          console.log('✅ Токен валидный');
+          console.log('✅ Токен валидный, пользователь уже авторизован');
+          // Если пользователь уже авторизован, перенаправляем на главную
+          router.push('/');
+          return;
         }
       } catch (error) {
         console.error('⚠️ Ошибка при проверке токена:', error);
       }
     };
     
-    clearInvalidToken();
+    const initTelegramAuth = async () => {
+      await clearInvalidToken();
+      
+      const script = document.createElement('script');
+      script.src = 'https://telegram.org/js/telegram-web-app.js';
+      script.async = true;
+      
+      script.onload = async () => {
+        // @ts-ignore
+        const WebApp = window.Telegram?.WebApp;
+        
+        if (WebApp && WebApp.initData) {
+          console.log('🤖 Telegram Mini App обнаружен, запускаем автоматическую авторизацию...');
+          
+          // Автоматически вызываем авторизацию через Telegram
+          try {
+            setTelegramLoading(true);
+            const initData = WebApp.initData;
+            
+            console.log('🔐 Отправка Telegram initData для автоматической авторизации...', { 
+              length: initData.length,
+              hasUser: initData.includes('user='),
+            });
+
+            const response = await fetch('/api/auth/telegram', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ initData }),
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+              console.log('✅ Автоматическая авторизация через Telegram Mini App успешна');
+              
+              // Обновляем контекст пользователя
+              await refreshUser();
+
+              // Перенаправляем на главную страницу
+              router.push('/');
+              router.refresh();
+            } else {
+              console.error('❌ Ошибка автоматической авторизации Telegram:', data.error);
+              setError(data.error || 'Ошибка авторизации через Telegram');
+              setTelegramLoading(false);
+            }
+          } catch (error: any) {
+            console.error('❌ Ошибка при автоматической авторизации Telegram:', error);
+            setError(`Ошибка: ${error?.message || 'Неизвестная ошибка'}`);
+            setTelegramLoading(false);
+          }
+        } else {
+          console.log('💻 Telegram Mini App не обнаружен, показываем форму входа');
+        }
+      };
+      
+      document.body.appendChild(script);
+    };
     
-    const script = document.createElement('script');
-    script.src = 'https://telegram.org/js/telegram-web-app.js';
-    script.async = true;
-    document.body.appendChild(script);
+    initTelegramAuth();
 
     return () => {
-      document.body.removeChild(script);
+      const script = document.querySelector('script[src="https://telegram.org/js/telegram-web-app.js"]');
+      if (script) {
+        document.body.removeChild(script);
+      }
     };
-  }, []);
+  }, [router, refreshUser]);
 
   const handleTelegramLogin = async () => {
     try {
@@ -96,6 +159,23 @@ export default function LoginPage() {
           // Обновляем контекст пользователя
           await refreshUser();
 
+          // Проверяем есть ли кабинеты
+          try {
+            const cabinetsResponse = await fetch('/api/cabinets');
+            if (cabinetsResponse.ok) {
+              const cabinets = await cabinetsResponse.json();
+              
+              // Если нет кабинетов - редирект на онбординг
+              if (!cabinets || cabinets.length === 0) {
+                console.log('📋 Нет кабинетов, редирект на онбординг');
+                router.push('/onboarding');
+                return;
+              }
+            }
+          } catch (error) {
+            console.log('⚠️ Ошибка проверки кабинетов, редирект на главную');
+          }
+
           // Перенаправляем на главную страницу
           router.push('/');
           router.refresh();
@@ -104,8 +184,8 @@ export default function LoginPage() {
           setError(data.error || 'Ошибка авторизации через Telegram');
         }
       } else {
-        // Если это веб-версия на ПК - перенаправляем на страницу с QR-кодом
-        console.log('💻 Авторизация через QR-код для веб-версии на ПК');
+        // Если это веб-версия - редирект на страницу с QR-кодом
+        console.log('💻 Редирект на страницу Telegram авторизации');
         router.push('/auth/telegram-desktop');
       }
     } catch (error: any) {
@@ -180,7 +260,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex items-center justify-center px-4 py-12">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex items-center justify-center px-4 py-8 md:py-12">
       {/* Background shapes */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-20 left-10 w-72 h-72 bg-blue-300 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
@@ -190,28 +270,28 @@ export default function LoginPage() {
 
       <div className="relative z-10 w-full max-w-md">
         {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
+        <div className="text-center mb-6 md:mb-8">
+          <h1 className="text-2xl md:text-4xl font-bold text-gray-900 mb-2">
             Добро пожаловать
           </h1>
-          <p className="text-gray-600">
+          <p className="text-sm md:text-base text-gray-600">
             Войдите в свой аккаунт WB Automation
           </p>
         </div>
 
         {/* Main Card */}
-        <div className="liquid-glass rounded-3xl border-2 border-gray-300 p-8 shadow-2xl">
-          <form onSubmit={handleSubmit} className="space-y-5">
+        <div className="liquid-glass rounded-2xl md:rounded-3xl border-2 border-gray-300 p-4 md:p-8 shadow-2xl">
+          <form onSubmit={handleSubmit} className="space-y-4 md:space-y-5">
             {error && (
-              <div className="flex gap-3 p-4 bg-red-50 border-2 border-red-300 rounded-xl">
-                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-red-700">{error}</p>
+              <div className="flex gap-2 md:gap-3 p-3 md:p-4 bg-red-50 border-2 border-red-300 rounded-lg md:rounded-xl">
+                <AlertCircle className="w-4 h-4 md:w-5 md:h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs md:text-sm text-red-700">{error}</p>
               </div>
             )}
 
             {/* Email Field */}
             <div>
-              <label className="block text-sm font-semibold text-gray-900 mb-2">
+              <label className="block text-xs md:text-sm font-semibold text-gray-900 mb-2">
                 Email
               </label>
               <input
@@ -220,13 +300,13 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 placeholder="you@example.com"
-                className="w-full px-4 py-3 bg-white/80 border-2 border-gray-300 rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none transition-all text-gray-900 placeholder-gray-500"
+                className="w-full px-3 md:px-4 py-2 md:py-3 bg-white/80 border-2 border-gray-300 rounded-lg md:rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none transition-all text-sm md:text-base text-gray-900 placeholder-gray-500"
               />
             </div>
 
             {/* Password Field */}
             <div>
-              <label className="block text-sm font-semibold text-gray-900 mb-2">
+              <label className="block text-xs md:text-sm font-semibold text-gray-900 mb-2">
                 Пароль
               </label>
               <div className="relative">
@@ -236,14 +316,14 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   placeholder="Введите ваш пароль"
-                  className="w-full px-4 py-3 bg-white/80 border-2 border-gray-300 rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none transition-all text-gray-900 placeholder-gray-500"
+                  className="w-full px-3 md:px-4 py-2 md:py-3 bg-white/80 border-2 border-gray-300 rounded-lg md:rounded-xl focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none transition-all text-sm md:text-base text-gray-900 placeholder-gray-500"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-3 text-gray-500 hover:text-gray-700"
+                  className="absolute right-3 top-2 md:top-3 text-gray-500 hover:text-gray-700"
                 >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  {showPassword ? <EyeOff className="w-4 h-4 md:w-5 md:h-5" /> : <Eye className="w-4 h-4 md:w-5 md:h-5" />}
                 </button>
               </div>
             </div>
@@ -252,41 +332,41 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-400 text-white font-semibold rounded-xl transition-all transform hover:scale-105 shadow-lg disabled:cursor-not-allowed disabled:hover:scale-100 mt-6"
+              className="w-full py-2.5 md:py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-400 text-white font-semibold rounded-lg md:rounded-xl transition-all transform hover:scale-105 shadow-lg disabled:cursor-not-allowed disabled:hover:scale-100 mt-4 md:mt-6 text-sm md:text-base"
             >
               {isLoading ? 'Вход...' : 'Войти'}
             </button>
           </form>
 
           {/* Divider */}
-          <div className="relative my-6">
+          <div className="relative my-4 md:my-6">
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t-2 border-gray-300"></div>
             </div>
-            <div className="relative flex justify-center text-sm">
+            <div className="relative flex justify-center text-xs md:text-sm">
               <span className="px-2 bg-white/80 text-gray-600">или</span>
             </div>
           </div>
 
-          {/* Telegram Button - Single unified button for web and Mini App */}
+          {/* Telegram Login Button */}
           <button
             type="button"
             onClick={handleTelegramLogin}
             disabled={telegramLoading}
-            className="w-full py-3 bg-white/80 border-2 border-gray-300 hover:border-blue-400 text-gray-900 font-semibold rounded-xl transition-all flex items-center justify-center gap-2 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-2.5 md:py-3 bg-[#0088cc] hover:bg-[#0077b3] text-white font-semibold rounded-lg md:rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm md:text-base shadow-lg"
           >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+            <svg className="w-5 h-5 md:w-6 md:h-6" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.16.16-.295.295-.605.295-.042 0-.084 0-.127-.01l.214-3.053 5.56-5.023c.242-.213-.054-.328-.373-.115l-6.869 4.332-2.96-.924c-.643-.204-.658-.643.135-.953l11.566-4.458c.54-.203 1.01.122.84.953z" />
             </svg>
-            {telegramLoading ? 'Вход...' : 'Войти через Telegram'}
+            <span>{telegramLoading ? 'Вход...' : 'Войти через Telegram'}</span>
           </button>
 
           {/* Login Link */}
-          <div className="mt-6 text-center">
-            <span className="text-gray-700">Нет аккаунта? </span>
+          <div className="mt-4 md:mt-6 text-center">
+            <span className="text-xs md:text-sm text-gray-700">Нет аккаунта? </span>
             <Link
               href="/auth/register"
-              className="text-purple-600 hover:text-purple-700 font-semibold underline"
+              className="text-xs md:text-sm text-purple-600 hover:text-purple-700 font-semibold underline"
             >
               Зарегистрироваться
             </Link>
@@ -294,7 +374,7 @@ export default function LoginPage() {
         </div>
 
         {/* Footer */}
-        <p className="text-center text-xs text-gray-600 mt-6">
+        <p className="text-center text-xs text-gray-600 mt-4 md:mt-6 px-4">
           Нажимая "Войти", вы принимаете наши{' '}
           <Link href="/cookies" className="text-purple-600 hover:underline">
             политики использования cookie

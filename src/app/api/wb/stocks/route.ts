@@ -4,6 +4,9 @@ import { safePrismaOperation } from '../../../../../lib/prisma-utils';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { WB_API_CONFIG } from '../../../../../lib/config/wbApiConfig';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/wb/stocks - Получение остатков со складов WB
  * POST /api/wb/stocks - Обновление остатков FBS
@@ -51,57 +54,106 @@ export async function GET(request: NextRequest) {
       console.log(`  - ${w.name} (ID: ${w.id}): deliveryType=${w.deliveryType} → тип=${warehouseType}`);
     });
 
-    // Получаем остатки со всех складов
-    const allStocks: any[] = [];
-    
-    for (const warehouse of warehouses) {
-      try {
-        const stocksResponse = await fetch(
-          `${WB_API_CONFIG.BASE_URLS.MARKETPLACE}/api/v3/stocks/${warehouse.id}`,
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': cabinet.apiToken,
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: JSON.stringify({ skus: [] })
-          }
-        );
-
-        if (stocksResponse.ok) {
-          const stocksData = await stocksResponse.json();
-          if (stocksData.stocks && Array.isArray(stocksData.stocks)) {
-            // Согласно документации WB API:
-            // deliveryType: 1 = FBS, 2 = FBW
-            const warehouseType = warehouse.deliveryType === 1 ? 'FBS' : 'FBW';
-            console.log(`📦 Склад "${warehouse.name}" (${warehouseType}): ${stocksData.stocks.length} остатков`);
-            
-            // Добавляем информацию о складе к каждому остатку
-            const stocksWithWarehouse = stocksData.stocks.map((stock: any) => ({
-              ...stock,
-              warehouseId: warehouse.id,
-              warehouseName: warehouse.name,
-              warehouseType: warehouseType
-            }));
-            allStocks.push(...stocksWithWarehouse);
-          } else {
-            console.log(`📦 Склад "${warehouse.name}": нет остатков или неверный формат`);
-          }
-        } else {
-          console.warn(`⚠️ Ошибка API для склада ${warehouse.name}: ${stocksResponse.status}`);
+    // Получаем баркоды товаров из БД для FBS остатков
+    const products = await prisma.product.findMany({
+      where: {
+        userId: user.id,
+        wbNmId: {
+          not: null // Только товары из WB
         }
-      } catch (error) {
-        console.warn(`⚠️ Ошибка получения остатков со склада ${warehouse.name}:`, error);
+      },
+      select: {
+        id: true,
+        wbNmId: true,
+        barcode: true,
+        barcodes: true
+      }
+    });
+
+    console.log(`📦 Найдено ${products.length} товаров в БД`);
+
+    // Собираем все баркоды
+    const allBarcodes: string[] = [];
+    for (const product of products) {
+      if (product.barcodes && Array.isArray(product.barcodes)) {
+        const validBarcodes = product.barcodes.filter((b: any) => typeof b === 'string');
+        allBarcodes.push(...validBarcodes);
+      } else if (product.barcode && typeof product.barcode === 'string') {
+        allBarcodes.push(product.barcode);
       }
     }
 
+    console.log(`📦 Всего баркодов: ${allBarcodes.length}`);
+
+    // Получаем остатки через wbApiService (FBW + FBS)
+    console.log(`📦 Загрузка остатков через wbApiService...`);
+    const { wbApiService } = await import('../../../../../lib/services/wbApiService');
+    const allStocks = await wbApiService.getStocksWithBarcodes(cabinet.apiToken, allBarcodes);
+    
+    console.log(`✅ Получено остатков: ${allStocks.length}`);
+    
+    // Показываем статистику по типам складов
+    const fbsCount = allStocks.filter(s => s.warehouseType === 'FBS').length;
+    const fbwCount = allStocks.filter(s => s.warehouseType === 'FBW').length;
+    console.log(`📊 Остатки по типам: FBS=${fbsCount}, FBW=${fbwCount}`);
+
+    // Получаем товары из БД для сопоставления по баркодам
+    const productsInDb = await prisma.product.findMany({
+      where: {
+        userId: user.id,
+        wbNmId: { not: null }
+      },
+      select: {
+        id: true,
+        wbNmId: true,
+        barcode: true,
+        barcodes: true
+      }
+    });
+    
+    // Создаем Map для быстрого поиска nmId по баркоду
+    const barcodeToNmId = new Map<string, string>();
+    productsInDb.forEach(product => {
+      if (product.barcodes && Array.isArray(product.barcodes)) {
+        (product.barcodes as string[]).forEach(barcode => {
+          if (barcode && product.wbNmId) {
+            barcodeToNmId.set(barcode, product.wbNmId);
+          }
+        });
+      }
+      if (product.barcode && product.wbNmId) {
+        barcodeToNmId.set(product.barcode, product.wbNmId);
+      }
+    });
+    
+    console.log(`📦 Создана карта баркодов: ${barcodeToNmId.size} баркодов`);
+    
     // Группируем остатки по товарам
     const stocksByProduct = new Map();
     console.log(`📦 Группировка ${allStocks.length} остатков по товарам...`);
     
     allStocks.forEach(stock => {
-      const nmId = stock.nmId;
+      let nmId = stock.nmId;
+      
+      // Если нет nmId, пытаемся найти по баркоду
+      if (!nmId && stock.barcode) {
+        nmId = barcodeToNmId.get(stock.barcode);
+        if (nmId) {
+          console.log(`✅ Найден nmId ${nmId} по баркоду ${stock.barcode}`);
+        }
+      }
+      
+      // Пропускаем товары без nmId и без баркода
+      if (!nmId) {
+        console.warn(`⚠️ Пропускаем товар без nmId и баркода:`, {
+          vendorCode: stock.vendorCode,
+          barcode: stock.barcode,
+          warehouseName: stock.warehouseName,
+          quantity: stock.quantity
+        });
+        return;
+      }
+      
       if (!stocksByProduct.has(nmId)) {
         stocksByProduct.set(nmId, {
           nmId,
@@ -115,21 +167,24 @@ export async function GET(request: NextRequest) {
       }
       
       const productStock = stocksByProduct.get(nmId);
+      const stockAmount = stock.quantity || stock.quantityFull || stock.amount || 0;
+      const reservedAmount = stock.inWayToClient || stock.reservedAmount || 0;
+      
       productStock.warehouses.push({
         warehouseId: stock.warehouseId,
         warehouseName: stock.warehouseName,
         warehouseType: stock.warehouseType,
-        stock: stock.amount || 0,
-        reserved: stock.reservedAmount || 0
+        stock: stockAmount,
+        reserved: reservedAmount
       });
       
-      productStock.totalStock += stock.amount || 0;
-      productStock.totalReserved += stock.reservedAmount || 0;
+      productStock.totalStock += stockAmount;
+      productStock.totalReserved += reservedAmount;
       
       if (stock.warehouseType === 'FBS') {
-        productStock.fbsStock += stock.amount || 0;
+        productStock.fbsStock += stockAmount;
       } else {
-        productStock.fbwStock += stock.amount || 0;
+        productStock.fbwStock += stockAmount;
       }
     });
     
@@ -144,6 +199,12 @@ export async function GET(request: NextRequest) {
     
     for (const stockData of stocksArray) {
       try {
+        // Проверяем, что nmId существует
+        if (!stockData.nmId) {
+          console.warn(`⚠️ Пропускаем товар без nmId:`, stockData);
+          continue;
+        }
+
         await prisma.product.updateMany({
           where: {
             wbNmId: stockData.nmId.toString(),

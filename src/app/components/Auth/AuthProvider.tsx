@@ -1,0 +1,93 @@
+'use client'
+
+import { createContext, useContext, useEffect, useState } from 'react'
+import { clientLogger } from '@/lib/logger';
+
+interface AuthUser {
+  id: string
+  email: string
+  name?: string
+  avatarUrl?: string
+  role: string
+  isActive: boolean
+}
+
+interface AuthContextType {
+  user: AuthUser | null
+  loading: boolean
+  authError: string | null
+  refreshUser: () => Promise<void>
+}
+
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  loading: true,
+  authError: null,
+  refreshUser: async () => {}
+})
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [authError, setAuthError] = useState<string | null>(null)
+
+  const refreshUser = async () => {
+    try {
+      clientLogger.log('🔍 [AuthProvider] Обновляем пользователя...');
+      setLoading(true);
+      setAuthError(null);
+      
+      const response = await fetch('/api/auth/session');
+      
+      clientLogger.log('🔍 [AuthProvider] Ответ от /api/auth/session:', { status: response.status, ok: response.ok });
+      
+      if (response.ok) {
+        const data = await response.json();
+        clientLogger.log('🔍 [AuthProvider] Данные сессии:', data);
+        clientLogger.log('🔍 [AuthProvider] success:', data.success);
+        clientLogger.log('🔍 [AuthProvider] user:', data.user);
+        clientLogger.log('🔍 [AuthProvider] message:', data.message);
+        
+        if (data.success && data.user) {
+          clientLogger.log('✅ [AuthProvider] Пользователь найден:', data.user.email);
+          setUser(data.user);
+          setAuthError(null);
+        } else {
+          clientLogger.log('🔍 [AuthProvider] Пользователь не найден или сессия неактивна');
+          clientLogger.log('🔍 [AuthProvider] Причина:', data.message);
+          setUser(null);
+          setAuthError(data.message || 'Сессия не найдена');
+        }
+      } else {
+        clientLogger.log('🔍 [AuthProvider] Ошибка ответа от /api/auth/session');
+        setUser(null);
+        setAuthError(`Ошибка аутентификации: HTTP ${response.status}`);
+      }
+    } catch (error) {
+      clientLogger.error('❌ [AuthProvider] Ошибка при обновлении пользователя:', error);
+      setUser(null);
+      setAuthError(error instanceof Error ? error.message : 'Неизвестная ошибка');
+    } finally {
+      clientLogger.log('🔍 [AuthProvider] Завершено обновление пользователя');
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshUser()
+  }, [])
+
+  return (
+    <AuthContext.Provider value={{ user, loading, authError, refreshUser }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export const useAuth = () => {
+  const context = useContext(AuthContext)
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider')
+  }
+  return context
+}

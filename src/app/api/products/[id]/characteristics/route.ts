@@ -4,6 +4,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../../lib/prisma';
 import { AuthService } from '../../../../../../lib/auth/auth-service';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/products/[id]/characteristics
  * Получение характеристик товара с результатами AI анализа

@@ -5,6 +5,9 @@ import { prisma } from '../../../../../lib/prisma';
 import { safePrismaOperation } from '../../../../../lib/prisma-utils';
 import { WbProductAnalyticsService } from '../../../../../lib/services/wbProductAnalyticsService';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 /**
  * GET - Cron endpoint для автоматической синхронизации аналитики
  * Вызывается каждый час через внешний cron сервис (например, Vercel Cron)
@@ -20,10 +23,21 @@ import { WbProductAnalyticsService } from '../../../../../lib/services/wbProduct
 export async function GET(request: NextRequest) {
   try {
     // Проверка авторизации cron запроса
+    // Vercel Cron отправляет заголовок x-vercel-cron: 1
+    // Оркестратор отправляет заголовок x-orchestrator: true
+    // Task scheduler отправляет заголовок x-task-scheduler: true
+    // Keep-alive отправляет заголовок x-keep-alive: true
+    const isVercelCron = request.headers.get('x-vercel-cron') === '1';
+    const isOrchestrator = request.headers.get('x-orchestrator') === 'true';
+    const isTaskScheduler = request.headers.get('x-task-scheduler') === 'true';
+    const isKeepAlive = request.headers.get('x-keep-alive') === 'true';
     const authHeader = request.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET || 'your-secret-key';
+    const cronSecret = process.env.CRON_SECRET;
     
-    if (authHeader !== `Bearer ${cronSecret}`) {
+    // Разрешаем запросы от Vercel Cron, оркестратора, task scheduler, keep-alive или с правильным CRON_SECRET
+    const isAuthorized = isVercelCron || isOrchestrator || isTaskScheduler || isKeepAlive || (cronSecret && authHeader === `Bearer ${cronSecret}`);
+    
+    if (!isAuthorized) {
       console.warn('⚠️ Неавторизованная попытка запуска cron job');
       return NextResponse.json({
         error: 'Unauthorized'
@@ -103,6 +117,7 @@ export async function GET(request: NextRequest) {
         }
 
         console.log(`📦 Кабинет ${cabinet.name}: синхронизация ${productsToSync.length} товаров`);
+        console.log(`⏱️ Задержка между запросами: 3000мс (увеличена для избежания 429 ошибок)`);
 
         // Создаем сервис аналитики
         const analyticsService = new WbProductAnalyticsService(cabinet.apiToken!);
@@ -113,11 +128,11 @@ export async function GET(request: NextRequest) {
           .filter((nmId): nmId is string => nmId !== null)
           .map(nmId => parseInt(nmId));
 
-        // Получаем аналитику (с задержкой между запросами)
+        // Получаем аналитику (с увеличенной задержкой между запросами)
         const analyticsData = await analyticsService.getBulkProductAnalytics(
           nmIds,
           30, // За последние 30 дней
-          1500 // Задержка 1.5 секунды между запросами для безопасности
+          3000 // Задержка 3 секунды между запросами для избежания 429
         );
 
         // Сохраняем данные в БД

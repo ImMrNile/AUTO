@@ -1,4 +1,4 @@
-/**
+﻿/**
  * src/app/api/analytics/comprehensive/route.ts
  * 
  * Comprehensive Analytics API Endpoint
@@ -16,6 +16,9 @@ import { AuthService } from '@/lib/auth/auth-service';
 import { prismaAnalytics } from '@/lib/prisma-analytics';
 import { safePrismaOperation } from '@/lib/prisma-utils';
 import { WbAnalyticsEngine } from '@/lib/services/wbAnalyticsEngine';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * GET - Comprehensive analytics with reconciliation

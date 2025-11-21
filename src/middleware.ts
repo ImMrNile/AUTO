@@ -6,7 +6,15 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname
   
   // Публичные пути - не требуют авторизации
-  const publicPaths = ['/auth/login', '/auth/register', '/auth/telegram-desktop', '/auth/callback']
+  const publicPaths = [
+    '/auth/login', 
+    '/auth/register', 
+    '/auth/callback', 
+    '/auth/telegram',
+    '/auth/telegram-desktop',
+    '/auth/telegram-phone',
+    '/onboarding'
+  ]
   
   // Проверяем наличие session_token cookie (старая система)
   const sessionToken = request.cookies.get('session_token')?.value
@@ -36,7 +44,13 @@ export async function middleware(request: NextRequest) {
   
   const isAuthenticated = !!sessionToken || !!supabaseUser
   
-  console.log(`🔒 Middleware: path=${path}, sessionToken=${!!sessionToken}, supabaseUser=${!!supabaseUser}`)
+  // Проверяем, запущено ли приложение из Telegram Mini App
+  const referer = request.headers.get('referer') || ''
+  const isTelegramMiniApp = referer.includes('telegram') || 
+                            request.headers.get('user-agent')?.includes('Telegram') ||
+                            request.headers.get('sec-fetch-site') === 'cross-site'
+  
+  console.log(`🔒 Middleware: path=${path}, sessionToken=${!!sessionToken}, supabaseUser=${!!supabaseUser}, isTelegramMiniApp=${isTelegramMiniApp}`)
   
   // Если это публичный путь - пропускаем
   if (publicPaths.some(p => path === p || path.startsWith(p + '/'))) {
@@ -50,6 +64,12 @@ export async function middleware(request: NextRequest) {
   
   // Если пользователь не авторизован и пытается получить доступ к защищенному маршруту
   if (!isAuthenticated) {
+    // Если это Telegram Mini App, перенаправляем на страницу входа, где произойдет автоматическая авторизация
+    if (isTelegramMiniApp) {
+      console.log('🔒 Middleware: Telegram Mini App обнаружен, перенаправляем на страницу входа для автоматической авторизации')
+      return NextResponse.redirect(new URL('/auth/login', request.url))
+    }
+    
     console.log('🔒 Middleware: Нет авторизации, редирект на логин для пути:', path)
     return NextResponse.redirect(new URL('/auth/login', request.url))
   }

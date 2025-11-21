@@ -1,6 +1,7 @@
 // src/app/hooks/useProductsCache.ts - Хук для фонового кеширования товаров
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { shouldDisableBackgroundRefresh, getOptimalCacheTime } from '@/lib/utils/deviceDetection';
 
 interface CacheConfig {
   key: string;
@@ -38,7 +39,18 @@ export function useProductsCache<T>(
   fetchFn: (signal?: AbortSignal, forceSync?: boolean) => Promise<T>,
   config: CacheConfig
 ): UseProductsCacheResult<T> {
-  console.log('🔧 useProductsCache вызван с config:', config);
+  // ✅ ОПТИМИЗАЦИЯ: Отключаем фоновое обновление на мобильных устройствах
+  const optimizedConfig = {
+    ...config,
+    backgroundRefresh: config.backgroundRefresh && !shouldDisableBackgroundRefresh(),
+    ttl: getOptimalCacheTime(config.ttl)
+  };
+  
+  console.log('🔧 useProductsCache вызван с config:', {
+    original: config,
+    optimized: optimizedConfig,
+    isMobile: shouldDisableBackgroundRefresh()
+  });
   
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,15 +73,15 @@ export function useProductsCache<T>(
   // Загрузка данных из localStorage
   const loadFromCache = useCallback((): CachedData<T> | null => {
     try {
-      const cached = localStorage.getItem(config.key);
+      const cached = localStorage.getItem(optimizedConfig.key);
       if (!cached) return null;
 
       const parsed: CachedData<T> = JSON.parse(cached);
       
       // Проверяем, не истек ли срок действия кеша
       if (Date.now() > parsed.expiresAt) {
-        console.log(`🗑️ Кеш товаров для ${config.key} истек, удаляем...`);
-        localStorage.removeItem(config.key);
+        console.log(`🗑️ Кеш товаров для ${optimizedConfig.key} истек, удаляем...`);
+        localStorage.removeItem(optimizedConfig.key);
         return null;
       }
 
@@ -80,7 +92,7 @@ export function useProductsCache<T>(
       console.error('❌ Ошибка загрузки товаров из кеша:', err);
       return null;
     }
-  }, [config.key]);
+  }, [optimizedConfig.key]);
 
   // Сохранение данных в localStorage
   const saveToCache = useCallback((newData: T) => {
@@ -88,20 +100,20 @@ export function useProductsCache<T>(
       const cached: CachedData<T> = {
         data: newData,
         timestamp: Date.now(),
-        expiresAt: Date.now() + config.ttl
+        expiresAt: Date.now() + optimizedConfig.ttl
       };
-      localStorage.setItem(config.key, JSON.stringify(cached));
-      console.log(`💾 Товары сохранены в кеш (TTL: ${config.ttl / 60000} мин)`);
+      localStorage.setItem(optimizedConfig.key, JSON.stringify(cached));
+      console.log(`💾 Товары сохранены в кеш (TTL: ${optimizedConfig.ttl / 60000} мин)`);
     } catch (err) {
       console.error('❌ Ошибка сохранения товаров в кеш:', err);
     }
-  }, [config.key, config.ttl]);
+  }, [optimizedConfig.key, optimizedConfig.ttl]);
 
   // Очистка кеша
   const clearCache = useCallback(() => {
-    localStorage.removeItem(config.key);
-    console.log(`🗑️ Кеш товаров для ${config.key} очищен`);
-  }, [config.key]);
+    localStorage.removeItem(optimizedConfig.key);
+    console.log(`🗑️ Кеш товаров для ${optimizedConfig.key} очищен`);
+  }, [optimizedConfig.key]);
 
   // Загрузка данных с сервера
   const fetchData = useCallback(async (isBackground = false, forceSync = false) => {
@@ -179,7 +191,7 @@ export function useProductsCache<T>(
       setLoading(false);
       
       // Если включено фоновое обновление, запускаем его
-      if (config.backgroundRefresh) {
+      if (optimizedConfig.backgroundRefresh) {
         console.log('🔄 useProductsCache: запуск фонового обновления товаров...');
         fetchData(true); // Фоновая загрузка
       }

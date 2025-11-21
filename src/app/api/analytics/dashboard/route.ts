@@ -12,6 +12,10 @@ import { WbReportService } from '@/lib/services/wbReportService';
 import { WbTariffService } from '@/lib/services/wbTariffService'; // ✅ Для получения KTR
 import { AnalyticsCalculator } from '@/lib/services/analyticsCalculator'; // ✅ Новый расчет из БД
 import { WbAnalyticsEngine } from '@/lib/services/wbAnalyticsEngine'; // ✅ Комплексный движок аналитики
+import { getCached, setCached } from '@/lib/cache/redis'; // ✅ Redis кеширование
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // НАСТРОЙКИ КЕШИРОВАНИЯ И RATE LIMITING
 const CACHE_CONFIG = {
@@ -266,43 +270,24 @@ export async function GET(request: NextRequest) {
 
     console.log(`✅ Работаем с кабинетом: ${cabinet.name || cabinet.id}`);
 
-    // ============ ПРОВЕРКА КЕША ============
-    const cacheKey = `analytics_dashboard_${cabinet.id}_${days}`;
-    
-    // 🔄 ОЧИСТКА КЕША: Если изменилась логика (days >= 7 теперь используем детализированный отчет)
-    // Удаляем старый кеш для дней 7-29 чтобы пересчитать с новой логикой
-    if (days >= 7 && days < 30) {
-      console.log(`🔄 Очищаем кеш для дней ${days} (изменилась логика на детализированный отчет)`);
-      await safePrismaOperation(
-        () => prismaAnalytics.wbApiCache.deleteMany({
-          where: { cacheKey }
-        }),
-        'очистка кеша при изменении логики'
-      );
-    }
+    // ============ REDIS КЕШИРОВАНИЕ ============
+    const cacheKey = `analytics:${user.id}:${cabinet.id}:${days}`;
     
     if (!forceRefresh) {
-      const cachedData = await safePrismaOperation(
-        () => prismaAnalytics.wbApiCache.findUnique({
-          where: { cacheKey }
-        }),
-        'проверка кеша'
-      );
-
-      if (cachedData && cachedData.expiresAt > new Date()) {
-        const cacheAge = Date.now() - cachedData.createdAt.getTime();
-        const cacheAgeMinutes = Math.floor(cacheAge / 60000);
-        
-        console.log(`✅ Аналитика взята из кеша (возраст: ${cacheAgeMinutes} мин)`);
+      const cached = await getCached<{ data: any; timestamp: number }>(cacheKey);
+      
+      if (cached) {
+        const cacheAge = Math.round((Date.now() - cached.timestamp) / 60000);
+        console.log(`✅ Cache HIT: Аналитика взята из Redis кеша (возраст: ${cacheAge} мин)`);
         
         return NextResponse.json({
-          ...(cachedData.data as any),
+          success: true,
+          data: cached.data,
           fromCache: true,
-          cacheAge: cacheAgeMinutes,
-          cacheExpiresIn: Math.floor((cachedData.expiresAt.getTime() - Date.now()) / 60000)
+          cacheAge
         });
       } else {
-        console.log('⚠️ Кеш устарел или отсутствует, загружаем свежие данные...');
+        console.log('⚠️ Cache MISS: Кеш отсутствует, загружаем свежие данные из WB API...');
       }
     } else {
       console.log('🔄 Принудительное обновление данных (forceRefresh=true)');
@@ -395,12 +380,12 @@ export async function GET(request: NextRequest) {
     console.log(`✅ Получено товаров: ${productsData.length}`);
 
     // Синхронизируем товары в БД для корректного расчета аналитики
-    // БАТЧИНГ: обрабатываем по 10 товаров за раз чтобы не перегружать БД
-    console.log('🔄 Синхронизация товаров в БД (батчами по 10)...');
+    // БАТЧИНГ: обрабатываем по 20 товаров за раз чтобы не перегружать БД
+    console.log('🔄 Синхронизация товаров в БД (батчами по 20)...');
     let syncedCount = 0;
     let skippedCount = 0;
-    const BATCH_SIZE = 10;
-    const BATCH_DELAY = 500; // 500мс между батчами
+    const BATCH_SIZE = 20; // Увеличено с 10 до 20
+    const BATCH_DELAY = 200; // Уменьшено с 500мс до 200мс
     
     for (let i = 0; i < productsData.length; i += BATCH_SIZE) {
       const batch = productsData.slice(i, i + BATCH_SIZE);
@@ -478,7 +463,7 @@ export async function GET(request: NextRequest) {
       request
     );
 
-    // ============ СОХРАНЕНИЕ В КЕШ ============
+    // ============ СОХРАНЕНИЕ В REDIS КЕШ ============
     const responseData = {
       success: true,
       data: analyticsResult
@@ -492,34 +477,15 @@ export async function GET(request: NextRequest) {
       returnsCount: analyticsResult.financial?.expenses?.returnsCount
     });
 
-    try {
-      const expiresAt = new Date(Date.now() + CACHE_CONFIG.CACHE_TTL);
-      
-      await safePrismaOperation(
-        () => prismaAnalytics.wbApiCache.upsert({
-          where: { cacheKey },
-          create: {
-            cacheKey,
-            data: responseData as any,
-            expiresAt,
-            createdAt: new Date()
-          },
-          update: {
-            data: responseData as any,
-            expiresAt,
-            createdAt: new Date()
-          }
-        }),
-        'сохранение аналитики в кеш'
-      );
-      
-      console.log(`✅ Аналитика сохранена в кеш на ${CACHE_CONFIG.CACHE_TTL / 60000} минут`);
-    } catch (cacheError) {
-      console.warn('⚠️ Не удалось сохранить аналитику в кеш:', cacheError);
-      // Продолжаем работу даже если кеширование не удалось
-    }
+    // Сохраняем в Redis с TTL 3600 секунд (1 час)
+    await setCached(cacheKey, { data: analyticsResult, timestamp: Date.now() }, 3600);
+    console.log(`✅ Аналитика сохранена в Redis кеш на 1 час`);
 
-    return NextResponse.json(responseData);
+    return NextResponse.json({
+      success: true,
+      data: analyticsResult,
+      fromCache: false
+    });
 
   } catch (error) {
     console.error('❌ Ошибка получения аналитики:', error);
@@ -1191,13 +1157,19 @@ async function buildAnalyticsDashboard(
   const ordersChange = previousOrders > 0 ? ((totalOrders - previousOrders) / previousOrders) * 100 : 0;
   const profitChange = previousProfit > 0 ? ((totalProfit - previousProfit) / previousProfit) * 100 : 0;
 
-  // Агрегация продаж по дням (используем finishedPrice - база продавца)
-  const salesByDay = aggregateSalesByDay(salesData);
-  console.log(`📊 salesByDay: ${salesByDay.length} дней, первый: ${salesByDay[0]?.date}, последний: ${salesByDay[salesByDay.length-1]?.date}`);
+  // Агрегация продаж по дням
+  // Для ≥30 дней используем detailedReport, для <30 дней - salesData
+  const dataForChart = useDetailedReport ? detailedReport! : salesData;
+  const salesByDay = useDetailedReport 
+    ? aggregateSalesByDayFromDetailedReport(detailedReport!)
+    : aggregateSalesByDay(salesData);
   
-  if (salesByDay.length === 0 && salesData.length > 0) {
-    console.warn('⚠️ График пустой (salesByDay.length = 0), но есть данные продаж (salesData.length = ' + salesData.length + ')');
-    console.log('🔍 Первая продажа:', salesData[0]);
+  console.log(`📊 salesByDay: ${salesByDay.length} дней, первый: ${salesByDay[0]?.date}, последний: ${salesByDay[salesByDay.length-1]?.date}`);
+  console.log(`📊 Источник данных для графика: ${useDetailedReport ? 'detailedReport' : 'salesData'}, записей: ${dataForChart.length}`);
+  
+  if (salesByDay.length === 0 && dataForChart.length > 0) {
+    console.warn('⚠️ График пустой (salesByDay.length = 0), но есть данные (dataForChart.length = ' + dataForChart.length + ')');
+    console.log('🔍 Первая запись:', dataForChart[0]);
   } else if (salesByDay.length === 0) {
     console.warn('⚠️ График пустой - нет данных о продажах за выбранный период');
   }
@@ -1213,7 +1185,7 @@ async function buildAnalyticsDashboard(
     console.log(`📦 Отфильтровано товаров из detailedReport: ${allItems.length}`);
     allItems.forEach((item: any) => {
       const nmId = item.nmId;
-      const current = productRevenue.get(nmId) || { revenue: 0, orders: 0, title: item.subject || `Товар ${nmId}` };
+      const current = productRevenue.get(nmId) || { revenue: 0, orders: 0, title: '' }; // Пустое название - заполним из БД
       
       // Для возвратов и отмен вычитаем выручку
       const multiplier = (item.docTypeName?.includes('возврат') || item.docTypeName?.includes('Возврат') || 
@@ -1221,20 +1193,33 @@ async function buildAnalyticsDashboard(
       
       current.revenue += (item.retailPriceWithDisc || item.retailPrice || 0) * multiplier;
       current.orders += item.quantity * multiplier;
+      
+      // Используем subject из WB если есть
+      if (item.subject && !current.title) {
+        current.title = item.subject;
+      }
+      
       productRevenue.set(nmId, current);
     });
   } else {
     // Из старого API
     salesData.forEach((sale: any) => {
       const nmId = sale.nmId;
-      const current = productRevenue.get(nmId) || { revenue: 0, orders: 0, title: sale.subject || `Товар ${nmId}` };
+      const current = productRevenue.get(nmId) || { revenue: 0, orders: 0, title: '' }; // Пустое название - заполним из БД
       current.revenue += sale.finishedPrice || 0;
       current.orders += 1;
+      
+      // Используем subject из WB если есть
+      if (sale.subject && !current.title) {
+        current.title = sale.subject;
+      }
+      
       productRevenue.set(nmId, current);
     });
   }
 
-  // Получаем названия товаров из БД для тех, у кого нет названия
+  // ✅ ОБОГАЩАЕМ ДАННЫЕ: Получаем названия товаров из БД
+  console.log(`📦 Загружаем названия для ${productRevenue.size} товаров из БД...`);
   const productIdsForTitles = Array.from(productRevenue.keys());
   const productsFromDb = await safePrismaOperation(
     () => prismaAnalytics.product.findMany({
@@ -1244,41 +1229,100 @@ async function buildAnalyticsDashboard(
       },
       select: {
         wbNmId: true,
-        name: true
+        name: true,
+        originalImage: true,
+        wbData: true
       }
     }),
     'получение названий товаров из БД'
   );
 
-  const productTitlesMap = new Map<number, string>();
+  const productTitlesMap = new Map<number, { name: string; image?: string }>();
+  let titlesFromDb = 0;
   (productsFromDb || []).forEach((p: any) => {
-    productTitlesMap.set(Number(p.wbNmId), p.name);
+    const nmId = Number(p.wbNmId);
+    
+    // Пытаемся получить изображение из разных источников
+    let imageUrl: string | null = null;
+    
+    // 1. Из originalImage (загруженное пользователем)
+    if (p.originalImage) {
+      imageUrl = p.originalImage;
+    }
+    // 2. Из wbData (если товар опубликован на WB)
+    else if (p.wbData && typeof p.wbData === 'object') {
+      const wbData = p.wbData as any;
+      if (wbData.photos && Array.isArray(wbData.photos) && wbData.photos.length > 0) {
+        imageUrl = wbData.photos[0];
+      }
+    }
+    
+    productTitlesMap.set(nmId, { 
+      name: p.name,
+      image: imageUrl || undefined
+    });
+    
+    if (p.name) titlesFromDb++;
   });
+  
+  console.log(`✅ Загружено названий из БД: ${titlesFromDb} из ${productRevenue.size} товаров`);
+  
+  // Логируем примеры данных из БД
+  if (productTitlesMap.size > 0) {
+    const firstEntry = Array.from(productTitlesMap.entries())[0];
+    console.log(`📋 Пример данных из БД:`, {
+      nmId: firstEntry[0],
+      name: firstEntry[1].name,
+      hasImage: !!firstEntry[1].image,
+      image: firstEntry[1].image?.substring(0, 100)
+    });
+  }
+  
+  // Обновляем названия в productRevenue
+  let updatedTitles = 0;
+  productRevenue.forEach((data, nmId) => {
+    const dbData = productTitlesMap.get(nmId);
+    // Обновляем если название пустое или отсутствует
+    if (dbData?.name && (!data.title || data.title.trim() === '')) {
+      console.log(`🔄 Обновляем название для товара ${nmId}: "${data.title}" -> "${dbData.name}"`);
+      data.title = dbData.name;
+      updatedTitles++;
+    }
+  });
+  
+  console.log(`✅ Обновлено названий: ${updatedTitles} из ${productRevenue.size} товаров`);
 
   console.log(`📦 productRevenue размер: ${productRevenue.size}`);
   
   const topProducts = Array.from(productRevenue.entries())
     .sort((a, b) => b[1].revenue - a[1].revenue)
     .slice(0, 10)
-    .map(([nmID, data]) => ({
-      nmID,
-      title: data.title || productTitlesMap.get(nmID) || `Товар ${nmID}`,
-      revenue: Math.round(data.revenue),
-      orders: data.orders,
-      image: generateWBImageUrl(nmID)
-    }));
+    .map(([nmID, data]) => {
+      const dbData = productTitlesMap.get(nmID);
+      const wbImageUrl = generateWBImageUrl(nmID);
+      
+      return {
+        nmID,
+        title: data.title || dbData?.name || `Товар ${nmID}`,
+        revenue: Math.round(data.revenue),
+        orders: data.orders,
+        image: dbData?.image || wbImageUrl // Приоритет: изображение из БД, затем WB
+      };
+    });
 
   // ✅ ВСЕ товары (для поиска)
   const allProducts = Array.from(productRevenue.entries())
     .sort((a, b) => b[1].revenue - a[1].revenue)
     .map(([nmID, data]) => {
-      const imageUrl = generateWBImageUrl(nmID);
+      const dbData = productTitlesMap.get(nmID);
+      const wbImageUrl = generateWBImageUrl(nmID);
+      
       return {
         nmID,
-        title: data.title || productTitlesMap.get(nmID) || `Товар ${nmID}`,
+        title: data.title || dbData?.name || `Товар ${nmID}`,
         revenue: Math.round(data.revenue),
         orders: data.orders,
-        image: imageUrl
+        image: dbData?.image || wbImageUrl // Приоритет: изображение из БД, затем WB
       };
     });
 
@@ -1511,7 +1555,51 @@ async function buildAnalyticsDashboard(
 }
 
 /**
- * Агрегация продаж по дням
+ * Агрегация продаж по дням из детализированного отчета
+ */
+function aggregateSalesByDayFromDetailedReport(detailedReport: any[]): Array<{ date: string; revenue: number; orders: number }> {
+  const dailyData = new Map<string, { revenue: number; orders: number }>();
+  
+  console.log(`📊 Агрегация продаж по дням из ${detailedReport.length} записей детализированного отчета`);
+  
+  detailedReport.forEach(item => {
+    // Используем saleDt (дата продажи) - основное поле в детализированном отчете WB
+    const dateStr = item.saleDt || item.sale_dt || item.orderDt || item.order_dt;
+    if (!dateStr) {
+      console.warn('⚠️ Запись без даты:', item);
+      return;
+    }
+    
+    const date = new Date(dateStr).toISOString().split('T')[0];
+    const current = dailyData.get(date) || { revenue: 0, orders: 0 };
+    
+    // Для возвратов и отмен вычитаем выручку
+    const isReturn = item.docTypeName?.includes('возврат') || item.docTypeName?.includes('Возврат') || 
+                     item.docTypeName?.includes('отмен') || item.docTypeName?.includes('Отмен');
+    const multiplier = isReturn ? -1 : 1;
+    
+    const revenue = (item.retailPriceWithDisc || item.retailPrice || 0) * (item.quantity || 1);
+    current.revenue += revenue * multiplier;
+    current.orders += (item.quantity || 1) * multiplier;
+    dailyData.set(date, current);
+  });
+
+  const result = Array.from(dailyData.entries())
+    .map(([date, data]) => ({
+      date,
+      revenue: Math.round(data.revenue),
+      orders: data.orders
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-30); // Последние 30 дней
+  
+  console.log(`✅ Агрегировано ${result.length} дней, первый: ${result[0]?.date}, последний: ${result[result.length-1]?.date}`);
+  
+  return result;
+}
+
+/**
+ * Агрегация продаж по дням из старого API
  */
 function aggregateSalesByDay(salesData: any[]): Array<{ date: string; revenue: number; orders: number }> {
   const dailyData = new Map<string, { revenue: number; orders: number }>();
@@ -1591,14 +1679,14 @@ function aggregateByCategory(salesData: any[]): Array<{ category: string; revenu
 
 /**
  * Генерация URL изображения товара
- * Используем публичный CDN Wildberries для избежания CORS ошибок
+ * Используем CDN Wildberries basket для получения изображений
  */
 function generateWBImageUrl(nmID: number): string {
   const vol = Math.floor(nmID / 100000);
   const part = Math.floor(nmID / 1000);
+  const basketNum = (vol % 10) + 1;
   
-  // Используем публичный CDN вместо basket (избегаем CORS)
-  // Формат: https://images.wbstatic.net/big/new/{первые 4 цифры артикула}0000/{артикул}-1.jpg
-  // Или используем tm вместо basket для публичного доступа
-  return `https://images.wbstatic.net/big/new/${Math.floor(nmID / 10000)}0000/${nmID}-1.jpg`;
+  // Формат WB CDN: https://basket-{01-10}.wbbasket.ru/vol{vol}/part{part}/{nmID}/images/big/1.webp
+  // Используем webp для лучшей производительности
+  return `https://basket-${String(basketNum).padStart(2, '0')}.wbbasket.ru/vol${vol}/part${part}/${nmID}/images/big/1.webp`;
 }

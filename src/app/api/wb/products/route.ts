@@ -7,6 +7,11 @@ import { prisma } from '../../../../../lib/prisma';
 import { safePrismaOperation } from '../../../../../lib/prisma-utils';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { WB_API_CONFIG } from '../../../../../lib/config/wbApiConfig';
+import { getCached, setCached, deleteCached } from '../../../../../lib/cache/redis';
+import { wbApiService } from '../../../../../lib/services/wbApiService';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // Rate limits согласно документации
 const RATE_LIMIT = {
@@ -36,9 +41,10 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const source = searchParams.get('source') || 'db';
+    const cabinetId = searchParams.get('cabinetId'); // Получаем ID кабинета
 
     if (source === 'db') {
-      return await getProductsFromDB(user.id);
+      return await getProductsFromDB(user.id, cabinetId);
     } else {
       return await getProductsFromWB(user.id, true);
     }
@@ -79,26 +85,60 @@ export async function POST(request: NextRequest) {
 // ЗАГРУЗКА ИЗ БД
 // ============================================================================
 
-async function getProductsFromDB(userId: string) {
-  console.log('📦 Загрузка товаров из БД для пользователя:', userId);
+async function getProductsFromDB(userId: string, cabinetId?: string | null) {
+  console.log('📦 Загрузка товаров из БД для пользователя:', userId, cabinetId ? `(кабинет: ${cabinetId})` : '(все кабинеты)');
 
   try {
+    // ============ REDIS КЕШИРОВАНИЕ ============
+    const cacheKey = cabinetId ? `products:${userId}:cabinet:${cabinetId}` : `products:${userId}:all`;
+    
+    // Проверяем кеш
+    const cached = await getCached<any[]>(cacheKey);
+    if (cached) {
+      console.log(`✅ Cache HIT: Товары взяты из Redis кеша (${cached.length} товаров)`);
+      
+      return NextResponse.json({
+        success: true,
+        products: cached,
+        total: cached.length,
+        source: 'database',
+        fromCache: true,
+        needsSync: false,
+        syncMessage: null
+      });
+    }
+    
+    console.log('⚠️ Cache MISS: Кеш отсутствует, загружаем из БД...');
     console.log('🔍 Начинаем запрос к БД (БЕЗ сортировки)...');
+    
+    // Формируем условия фильтрации
+    const whereConditions: any = {
+      userId: userId,
+      wbNmId: {
+        not: null // ТОЛЬКО товары с WB (исключаем тестовые)
+      }
+    };
+    
+    // Добавляем фильтр по кабинету, если указан
+    if (cabinetId) {
+      whereConditions.productCabinets = {
+        some: {
+          cabinetId: cabinetId
+        }
+      };
+    }
     
     // ОПТИМИЗАЦИЯ: Убираем сортировку - она занимала 31 секунду
     const products = await safePrismaOperation(
       () => prisma.product.findMany({
-        where: {
-          userId: userId,
-          wbNmId: {
-            not: null // ТОЛЬКО товары с WB (исключаем тестовые)
-          }
-        },
+        where: whereConditions,
         select: {
           id: true,
           wbNmId: true,
           name: true,
           vendorCode: true,
+          barcode: true, // Баркод товара
+          barcodes: true, // Массив баркодов
           price: true,
           stock: true,
           status: true,
@@ -125,6 +165,10 @@ async function getProductsFromDB(userId: string) {
     
     console.log(`✅ Загружено ${products.length} товаров из БД (без лимита)`);
 
+    // Сохраняем в Redis с TTL 3600 секунд (1 час) для оптимальной производительности
+    await setCached(cacheKey, products, 3600);
+    console.log(`✅ Товары сохранены в Redis кеш на 1 час`);
+
     // АВТОСИНХРОНИЗАЦИЯ: Если товаров нет, предлагаем синхронизацию
     const needsSync = products.length === 0;
 
@@ -133,6 +177,7 @@ async function getProductsFromDB(userId: string) {
       products: products,
       total: products.length,
       source: 'database',
+      fromCache: false,
       needsSync, // Флаг для фронтенда
       syncMessage: needsSync ? 
         (products.length === 0 ? 
@@ -201,7 +246,7 @@ async function getProductsFromWB(userId: string, syncToDb: boolean) {
 
     // ШАГ 3: Получаем остатки товаров
     console.log('📦 Шаг 3/4: Получение остатков товаров...');
-    const stocks = await fetchProductStocks(cabinet.apiToken);
+    const stocks = await fetchProductStocks(cabinet.apiToken, cards);
     console.log(`✅ Получено остатков для ${stocks.length} товаров`);
 
     await delay(RATE_LIMIT.DELAY_BETWEEN_REQUESTS);
@@ -216,6 +261,96 @@ async function getProductsFromWB(userId: string, syncToDb: boolean) {
       console.log('💾 Синхронизация с базой данных...');
       const syncResult = await syncProductsToDB(enrichedProducts, userId);
       console.log('✅ Синхронизация завершена');
+      
+      // ============ ИНВАЛИДАЦИЯ КЕША ============
+      const cacheKey = `products:${userId}:all`;
+      await deleteCached(cacheKey);
+      console.log(`🗑️ Кеш товаров инвалидирован после синхронизации`);
+      
+      // ============ АВТОСИНХРОНИЗАЦИЯ ОСТАТКОВ ============
+      // После импорта товаров автоматически синхронизируем остатки через баркоды
+      console.log('📦 Автоматическая синхронизация остатков через баркоды...');
+      try {
+        // Получаем баркоды всех товаров
+        const products = await prisma.product.findMany({
+          where: {
+            userId: userId,
+            wbNmId: { not: null }
+          },
+          select: {
+            id: true,
+            wbNmId: true,
+            barcode: true,
+            barcodes: true
+          }
+        });
+        
+        const allBarcodes: string[] = [];
+        for (const product of products) {
+          if (product.barcodes && Array.isArray(product.barcodes)) {
+            const validBarcodes = (product.barcodes as any[]).filter((b: any) => typeof b === 'string' && b) as string[];
+            allBarcodes.push(...validBarcodes);
+          } else if (product.barcode && typeof product.barcode === 'string') {
+            allBarcodes.push(product.barcode);
+          }
+        }
+        
+        console.log(`📦 Найдено ${allBarcodes.length} баркодов для синхронизации`);
+        
+        // Загружаем остатки через баркоды
+        const detailedStocks = await wbApiService.getStocksWithBarcodes(cabinet.apiToken, allBarcodes);
+        console.log(`✅ Получено ${detailedStocks.length} записей остатков`);
+        
+        // Группируем остатки по nmId
+        const stocksByNmId = new Map<string, { fbs: number; fbw: number; dbs: number }>();
+        for (const stock of detailedStocks) {
+          const nmId = String(stock.nmId);
+          const warehouseType = stock.warehouseType || 'FBW';
+          const quantity = stock.quantity || stock.quantityFull || 0;
+          
+          if (!stocksByNmId.has(nmId)) {
+            stocksByNmId.set(nmId, { fbs: 0, fbw: 0, dbs: 0 });
+          }
+          
+          const current = stocksByNmId.get(nmId)!;
+          if (warehouseType === 'FBS') {
+            current.fbs += quantity;
+          } else if (warehouseType === 'DBS') {
+            current.dbs += quantity;
+          } else {
+            current.fbw += quantity;
+          }
+        }
+        
+        // Обновляем остатки в БД
+        let updatedStocksCount = 0;
+        for (const [nmId, stockData] of stocksByNmId.entries()) {
+          try {
+            const totalStock = stockData.fbs + stockData.fbw + stockData.dbs;
+            await prisma.product.updateMany({
+              where: {
+                wbNmId: nmId,
+                userId: userId
+              },
+              data: {
+                stock: totalStock,
+                fbsStock: stockData.fbs,
+                fbwStock: stockData.fbw,
+                lastWbSyncAt: new Date(),
+                wbSyncStatus: 'synced'
+              }
+            });
+            updatedStocksCount++;
+          } catch (error) {
+            console.error(`❌ Ошибка обновления остатков для товара ${nmId}:`, error);
+          }
+        }
+        
+        console.log(`✅ Остатки синхронизированы для ${updatedStocksCount} товаров`);
+      } catch (error) {
+        console.error('❌ Ошибка автосинхронизации остатков:', error);
+        // Не прерываем выполнение, просто логируем ошибку
+      }
       
       return NextResponse.json({
         success: true,
@@ -281,7 +416,7 @@ async function fetchProductPrices(apiToken: string, limit = 1000, offset = 0): P
  * Endpoint: GET /api/v3/stocks/{warehouseId}
  * Документация: https://dev.wildberries.ru/en/openapi/work-with-products#tag/Inventory
  */
-async function fetchProductStocks(apiToken: string): Promise<any[]> {
+async function fetchProductStocks(apiToken: string, cards: any[]): Promise<any[]> {
   try {
     // Сначала получаем список складов
     const warehousesResponse = await fetchWithRetry(
@@ -305,9 +440,26 @@ async function fetchProductStocks(apiToken: string): Promise<any[]> {
     // Получаем остатки со всех складов
     const allStocks: any[] = [];
     
+    // Собираем все баркоды из карточек товаров для запроса остатков
+    const allBarcodes: string[] = [];
+    if (cards && Array.isArray(cards)) {
+      cards.forEach((card: any) => {
+        if (card.sizes && Array.isArray(card.sizes)) {
+          card.sizes.forEach((size: any) => {
+            if (size.skus && Array.isArray(size.skus)) {
+              allBarcodes.push(...size.skus);
+            }
+          });
+        }
+      });
+    }
+    
+    console.log(`📦 Собрано ${allBarcodes.length} баркодов для запроса остатков`);
+    
     for (const warehouse of warehousesData) {
       try {
-        // Используем обычный fetch без retry для складов (некоторые склады могут быть недоступны)
+        // Согласно документации WB API: нужно передавать массив баркодов
+        // Пустой массив вызывает ошибку 400
         const stocksResponse = await fetch(
           `${WB_API_CONFIG.BASE_URLS.MARKETPLACE}/api/v3/stocks/${warehouse.id}`,
           {
@@ -317,12 +469,22 @@ async function fetchProductStocks(apiToken: string): Promise<any[]> {
               'Content-Type': 'application/json',
               'Accept': 'application/json'
             },
-            body: JSON.stringify({ skus: [] }) // Пустой массив = все товары
+            body: JSON.stringify({ skus: allBarcodes }) // Передаем все баркоды
           }
         );
 
         if (!stocksResponse.ok) {
+          const errorText = await stocksResponse.text();
           console.warn(`⚠️ Склад ${warehouse.id} (${warehouse.name}) недоступен: ${stocksResponse.status}`);
+          console.warn(`   Ответ WB API: ${errorText.substring(0, 200)}`);
+          
+          if (stocksResponse.status === 400) {
+            console.warn(`   💡 Возможные причины ошибки 400:`);
+            console.warn(`      - Склад не поддерживает API v3`);
+            console.warn(`      - Склад заблокирован или неактивен`);
+            console.warn(`      - Неправильный формат запроса для этого типа склада`);
+          }
+          
           continue; // Пропускаем этот склад и продолжаем
         }
 
@@ -341,11 +503,46 @@ async function fetchProductStocks(apiToken: string): Promise<any[]> {
     }
 
     console.log(`📊 Всего получено ${allStocks.length} записей остатков с ${warehousesData.length} складов`);
+    
+    if (allStocks.length === 0 && warehousesData.length > 0) {
+      console.warn(`⚠️ ВНИМАНИЕ: Ни один склад не вернул остатки!`);
+      console.warn(`   Проверьте:`);
+      console.warn(`   1. Права доступа API токена (нужен доступ к остаткам)`);
+      console.warn(`   2. Активность складов в личном кабинете WB`);
+      console.warn(`   3. Тип складов (FBS/FBW) - не все поддерживают API v3`);
+    }
 
-    // Группируем остатки по nmID
+    // Создаем маппинг баркод → nmId из карточек товаров
+    const barcodeToNmId = new Map<string, number>();
+    if (cards && Array.isArray(cards)) {
+      cards.forEach((card: any) => {
+        const nmId = card.nmID;
+        if (card.sizes && Array.isArray(card.sizes)) {
+          card.sizes.forEach((size: any) => {
+            if (size.skus && Array.isArray(size.skus)) {
+              size.skus.forEach((sku: string) => {
+                barcodeToNmId.set(sku, nmId);
+              });
+            }
+          });
+        }
+      });
+    }
+    
+    console.log(`🔗 Создан маппинг для ${barcodeToNmId.size} баркодов → nmId`);
+    
+    // Группируем остатки по nmID, используя маппинг баркод → nmId
     const stocksByNmId = new Map();
     allStocks.forEach(stock => {
-      const nmId = stock.nmId;
+      // Согласно документации WB API: ответ содержит "sku" (баркод) и "amount" (количество)
+      const barcode = stock.sku;
+      const nmId = barcodeToNmId.get(barcode);
+      
+      if (!nmId) {
+        console.warn(`⚠️ Не найден nmId для баркода: ${barcode}`);
+        return;
+      }
+      
       if (!stocksByNmId.has(nmId)) {
         stocksByNmId.set(nmId, {
           nmId: nmId,
@@ -355,7 +552,8 @@ async function fetchProductStocks(apiToken: string): Promise<any[]> {
       }
       const current = stocksByNmId.get(nmId);
       current.stock += stock.amount || 0;
-      current.reserved += stock.reservedAmount || 0;
+      // В API v3 нет reservedAmount, только amount
+      current.reserved += 0;
     });
 
     const result = Array.from(stocksByNmId.values());
@@ -521,8 +719,8 @@ function processProductCards(cards: any[], pricesData: any[], stocksData: any[])
     // Логируем данные товара
     console.log(`📊 Товар ${card.nmID}: цена=${price}₽, скидка=${discountPrice}₽ (-${discount}%), остаток=${stock}, резерв=${reserved}`);
 
-    // Себестоимость (60% от цены - настраивается)
-    const costPrice = Math.floor(price * 0.6);
+    // Себестоимость НЕ рассчитывается автоматически - пользователь должен указать вручную
+    // const costPrice = Math.floor(price * 0.6);
 
     // Логируем товары без цен
     if (price === 0) {
@@ -545,7 +743,7 @@ function processProductCards(cards: any[], pricesData: any[], stocksData: any[])
       discount: discount,
       clubDiscount: clubDiscount,
       clubDiscountedPrice: clubDiscountedPrice,
-      costPrice: costPrice,
+      // costPrice: costPrice, // Убираем авторасчет себестоимости
       
       // Остатки
       stock: stock,
@@ -588,22 +786,59 @@ async function syncProductsToDB(products: any[], userId: string) {
       const uniqueId = `wb_${product.nmID}_${userId}`;
       console.log(`💾 Синхронизация товара: ${product.nmID} - ${product.title}`);
       
-      // Проверяем, существует ли товар и есть ли у него себестоимость
+      // Проверяем, существует ли товар и есть ли у него баркоды/себестоимость
       const existingProduct = await safePrismaOperation(
         () => prisma.product.findUnique({
           where: { id: uniqueId },
-          select: { costPrice: true }
+          select: { 
+            costPrice: true,
+            barcode: true,
+            barcodes: true
+          }
         })
       );
       
-      // Если товар существует и у него есть себестоимость - сохраняем её
-      const costPriceToUse = existingProduct?.costPrice ?? product.costPrice;
+      // Извлекаем баркоды ТОЛЬКО если их нет в БД
+      let barcodes: string[] = [];
+      let primaryBarcode: string | null = null;
       
-      if (existingProduct?.costPrice) {
-        console.log(`💰 Сохраняем существующую себестоимость: ${existingProduct.costPrice}₽`);
+      if (existingProduct?.barcodes && Array.isArray(existingProduct.barcodes) && existingProduct.barcodes.length > 0) {
+        // Баркоды уже есть в БД - используем их (конвертируем из JsonArray в string[])
+        barcodes = existingProduct.barcodes.filter((b): b is string => typeof b === 'string');
+        primaryBarcode = existingProduct.barcode || barcodes[0];
+        console.log(`✅ Баркоды уже в БД: ${barcodes.length} шт.`);
+      } else {
+        // Баркодов нет - извлекаем из WB данных
+        if (product.sizes && Array.isArray(product.sizes)) {
+          for (const size of product.sizes) {
+            if (size.skus && Array.isArray(size.skus)) {
+              for (const sku of size.skus) {
+                if (sku && !barcodes.includes(sku)) {
+                  barcodes.push(sku);
+                }
+              }
+            }
+          }
+        }
+        primaryBarcode = barcodes.length > 0 ? barcodes[0] : null;
+        
+        if (barcodes.length > 0) {
+          console.log(`📦 Извлечено баркодов из WB: ${barcodes.length} шт.`);
+        }
       }
       
-      await safePrismaOperation(
+      // ВАЖНО: Себестоимость НЕ приходит из WB API - это внутренние данные пользователя
+      // При синхронизации сохраняем себестоимость, которую пользователь указал ранее
+      // Если товар новый - себестоимость будет null (пользователь укажет вручную)
+      const costPriceToUse = existingProduct?.costPrice ?? null;
+      
+      if (existingProduct?.costPrice) {
+        console.log(`✅ Себестоимость (указана пользователем): ${existingProduct.costPrice}₽`);
+      } else {
+        console.log(`⚪ Себестоимость не указана (ожидает ввода пользователя)`);
+      }
+      
+      const upsertedProduct = await safePrismaOperation(
         () => prisma.product.upsert({
           where: { id: uniqueId },
           update: {
@@ -613,6 +848,8 @@ async function syncProductsToDB(products: any[], userId: string) {
             wbNmId: product.nmID?.toString(), // Сохраняем nmID в отдельное поле
             wbImtId: product.imtID?.toString(),
             vendorCode: product.vendorCode,
+            barcode: primaryBarcode, // Сохраняем основной баркод
+            barcodes: barcodes.length > 0 ? barcodes : undefined, // Сохраняем все баркоды
             brand: product.brand,
             seoDescription: product.description,
             discountPrice: product.discountPrice,
@@ -660,11 +897,13 @@ async function syncProductsToDB(products: any[], userId: string) {
             wbNmId: product.nmID?.toString(), // Сохраняем nmID в отдельное поле
             wbImtId: product.imtID?.toString(),
             vendorCode: product.vendorCode,
+            barcode: primaryBarcode, // Сохраняем основной баркод
+            barcodes: barcodes.length > 0 ? barcodes : undefined, // Сохраняем все баркоды
             brand: product.brand,
             seoDescription: product.description,
             discountPrice: product.discountPrice,
             discount: product.discount,
-            costPrice: product.costPrice,
+            costPrice: null, // Себестоимость не приходит из WB - пользователь укажет вручную
             stock: product.stock,
             reserved: product.reserved,
             inTransit: product.inTransit,
@@ -699,6 +938,45 @@ async function syncProductsToDB(products: any[], userId: string) {
         }),
         `синхронизация товара ${product.nmID}`
       );
+
+      // ✅ АВТОМАТИЧЕСКАЯ ПРИВЯЗКА К КАБИНЕТУ при первом импорте
+      if (upsertedProduct) {
+        try {
+          // Проверить есть ли уже привязка к кабинету
+          const existingLink = await prisma.productCabinet.findFirst({
+            where: { productId: upsertedProduct.id }
+          });
+          
+          if (!existingLink) {
+            // Найти первый активный кабинет с токеном
+            const cabinet = await prisma.cabinet.findFirst({
+              where: {
+                userId: userId,
+                isActive: true,
+                apiToken: { not: null }
+              },
+              orderBy: { createdAt: 'asc' }
+            });
+            
+            if (cabinet) {
+              // Создать привязку
+              await prisma.productCabinet.create({
+                data: {
+                  productId: upsertedProduct.id,
+                  cabinetId: cabinet.id,
+                  isSelected: true
+                }
+              });
+              console.log(`✅ Товар ${product.nmID} автоматически привязан к кабинету: ${cabinet.name}`);
+            } else {
+              console.log(`⚠️ Товар ${product.nmID}: нет активного кабинета для привязки`);
+            }
+          }
+        } catch (linkError) {
+          console.warn(`⚠️ Не удалось привязать товар ${product.nmID} к кабинету:`, linkError);
+          // Не прерываем синхронизацию из-за ошибки привязки
+        }
+      }
 
       synced++;
       await delay(50); // Небольшая задержка между записями

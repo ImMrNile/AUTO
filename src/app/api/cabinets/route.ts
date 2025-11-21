@@ -1,8 +1,11 @@
-// src/app/api/cabinets/route.ts - Полный роутер для кабинетов
+﻿// src/app/api/cabinets/route.ts - Полный роутер для кабинетов
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../lib/prisma';
 import { AuthService } from './../../../../lib/auth/auth-service';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // Новые базовые URL API Wildberries 2025
 const WB_API_ENDPOINTS = {

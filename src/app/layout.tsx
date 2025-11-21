@@ -1,13 +1,11 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
-import { AuthProvider } from './components/AuthProvider'
+import { AuthProvider, AuthGuard } from './components/Auth'
 import { TaskProvider } from './components/BackgroundTasks/TaskProvider'
-import TaskNotificationsWrapper from './components/BackgroundTasks/TaskNotificationsWrapper'
-import BackgroundProductLoader from './components/BackgroundProductLoader'
-import BackgroundTaskInitializer from './components/BackgroundTaskInitializer'
-import CookieConsent from './components/CookieConsent'
-import AuthGuard from './components/AuthGuard'
+import { BackgroundProductLoader, BackgroundTaskInitializer, BackgroundSyncWorker } from './components/background'
+import { CookieConsent } from './components/layout'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 
 const inter = Inter({ 
   subsets: ['latin', 'cyrillic'],
@@ -220,10 +218,10 @@ export default function RootLayout({
                   {children}
                   {/* Инициализация фоновых задач */}
                   <BackgroundTaskInitializer />
-                  {/* Глобальные уведомления о задачах */}
-                  <TaskNotificationsWrapper />
                   {/* Фоновая загрузка товаров */}
                   <BackgroundProductLoader />
+                  {/* Автоматическое обновление аналитики и цен каждые 90 минут */}
+                  <BackgroundSyncWorker />
                   {/* Cookie Consent Banner */}
                   <CookieConsent />
                 </TaskProvider>
@@ -231,6 +229,8 @@ export default function RootLayout({
             </AuthGuard>
           </div>
         </div>
+        {/* Vercel Speed Insights */}
+        <SpeedInsights />
       </body>
     </html>
   )

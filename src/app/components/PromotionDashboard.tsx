@@ -588,6 +588,11 @@ export default function PromotionDashboard({ cabinetId }: PromotionDashboardProp
                     src={product.image}
                     alt={product.name}
                     className="w-24 h-24 object-cover rounded-lg border-2 border-gray-200"
+                    loading="lazy"
+                    decoding="async"
+                    onError={(e) => {
+                      e.currentTarget.src = '/placeholder.png';
+                    }}
                   />
                 </div>
 
@@ -639,23 +644,34 @@ export default function PromotionDashboard({ cabinetId }: PromotionDashboardProp
                   </div>
 
                   {/* Дополнительные метрики */}
-                  <div className="flex items-center gap-6 pt-3 border-t border-gray-200">
-                    <div className="text-sm">
-                      <span className="text-gray-600">CTR: </span>
-                      <span className="font-bold text-blue-600">{formatPercent(parseFloat(product.ctr))}</span>
+                  <div className="flex items-center justify-between pt-3 border-t border-gray-200">
+                    <div className="flex items-center gap-6">
+                      <div className="text-sm">
+                        <span className="text-gray-600">CTR: </span>
+                        <span className="font-bold text-blue-600">{formatPercent(parseFloat(product.ctr))}</span>
+                      </div>
+                      <div className="text-sm">
+                        <span className="text-gray-600">Конверсия в корзину: </span>
+                        <span className="font-bold text-yellow-600">
+                          {formatPercent((product.addToCart / product.views) * 100)}
+                        </span>
+                      </div>
+                      <div className="text-sm">
+                        <span className="text-gray-600">Конверсия в заказ: </span>
+                        <span className="font-bold text-green-600">
+                          {formatPercent((product.orders / product.views) * 100)}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-sm">
-                      <span className="text-gray-600">Конверсия в корзину: </span>
-                      <span className="font-bold text-yellow-600">
-                        {formatPercent((product.addToCart / product.views) * 100)}
-                      </span>
-                    </div>
-                    <div className="text-sm">
-                      <span className="text-gray-600">Конверсия в заказ: </span>
-                      <span className="font-bold text-green-600">
-                        {formatPercent((product.orders / product.views) * 100)}
-                      </span>
-                    </div>
+                    
+                    {/* Кнопка AI Улучшение */}
+                    <button
+                      onClick={() => window.location.href = `/products/${product.id}/ai-improve`}
+                      className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:shadow-lg hover:scale-105 transition-all flex items-center gap-2 font-semibold"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      🤖 AI Улучшение
+                    </button>
                   </div>
                 </div>
               </div>

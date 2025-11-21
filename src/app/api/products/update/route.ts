@@ -1,7 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { safePrismaOperation } from '../../../../../lib/prisma-utils';
 import { AuthService } from '../../../../../lib/auth/auth-service';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/products/update

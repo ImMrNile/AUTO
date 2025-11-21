@@ -153,6 +153,11 @@ export default function Step1BasicInfo({
                   src={imagePreview} 
                   alt="Превью товара" 
                   className="max-w-xs mx-auto rounded-lg shadow-lg"
+                  loading="lazy"
+                  decoding="async"
+                  onError={(e) => {
+                    e.currentTarget.src = '/placeholder.png';
+                  }}
                 />
                 <div className="flex items-center justify-center gap-2">
                   <Image className="w-4 h-4 text-green-400" />

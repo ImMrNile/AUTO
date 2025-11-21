@@ -1,0 +1,56 @@
+{
+  "Список кампаний (v1/promotion/count)": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"6c541e89d7cb421d33898890d6e30a45\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:14:52Z\"\n}\r\n"
+  },
+  "Информация о кампаниях (v1/promotion/adverts)": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"07b43912a5b3718e461a1e5b1174ba0c\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:14:53Z\"\n}\r\n"
+  },
+  "Статистика v3/fullstats": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"98a5df870f9b55d776d5a78c019240a6\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:14:54Z\"\n}\r\n"
+  },
+  "Статистика v2/fullstats": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"b400f69e13abe2e1dd3fb1a027044df6\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:14:55Z\"\n}\r\n"
+  },
+  "Keywords API": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"d8e7c882d694e9919b589375c318dc34\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:14:56Z\"\n}\r\n"
+  },
+  "Баланс рекламы": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"17f3f6a4230d6ada23977cec4a925cd2\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:14:58Z\"\n}\r\n"
+  },
+  "Бюджет кампании": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"f2c8ebf5a13667f173ffee8623aeb4f7\",\n    \"origin\": \"s2s-api-auth-adv\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:14:59Z\"\n}\r\n"
+  },
+  "Статистика продаж": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"4f7296bb8dc5dbb0d34e3ea27dc020ad\",\n    \"origin\": \"s2s-api-auth-stat\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:15:01Z\"\n}\r\n"
+  },
+  "Заказы": {
+    "success": false,
+    "status": 401,
+    "error": "{\n    \"title\": \"unauthorized\",\n    \"detail\": \"token scope not allowed\",\n    \"code\": \"461a0b83d6bd a53a3d31f8b003bce 8d7a4aaab17a\",\n    \"requestId\": \"077b499827e41660fa1c08f80979b4ae\",\n    \"origin\": \"s2s-api-auth-stat\",\n    \"status\": 401,\n    \"statusText\": \"Unauthorized\",\n    \"timestamp\": \"2025-11-06T11:15:02Z\"\n}\r\n"
+  },
+  "Аналитика товара": {
+    "success": false,
+    "status": 405,
+    "error": "{\n    \"title\": \"method not allowed\",\n    \"detail\": \"allowed methods are listed in the Allow header (POST); Please consult the https://dev.wildberries.ru/openapi/api-information\",\n    \"code\": \"9995b4770d66c 66f84d927906\",\n    \"requestId\": \"e8e10fd61dbc0dd0a247cdcfdede578a\",\n    \"origin\": \"s2sauth-ca\",\n    \"status\": 405,\n    \"statusText\": \"Method Not Allowed\",\n    \"timestamp\": \"2025-11-06T11:15:04Z\"\n}\r\n"
+  },
+  "Список НМ": {
+    "success": false,
+    "error": "fetch failed"
+  }
+}

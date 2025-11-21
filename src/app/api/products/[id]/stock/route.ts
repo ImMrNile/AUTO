@@ -6,6 +6,9 @@ import { safePrismaOperation } from '../../../../../../lib/prisma-utils';
 import { AuthService } from '../../../../../../lib/auth/auth-service';
 import { wbApiService } from '../../../../../../lib/services/wbApiService';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 /**
  * PUT /api/products/[id]/stock - Обновление остатков товара на WB
  */
@@ -34,10 +37,16 @@ export async function PUT(
       }, { status: 400 });
     }
 
-    // Получаем товар
+    // Получаем товар (поддерживаем как внутренний ID, так и wbNmId)
     const product = await safePrismaOperation(
-      () => prisma.product.findUnique({
-        where: { id: params.id },
+      () => prisma.product.findFirst({
+        where: {
+          OR: [
+            { id: params.id },
+            { wbNmId: params.id }
+          ],
+          userId: user.id
+        },
         select: {
           id: true,
           userId: true,
@@ -198,10 +207,16 @@ export async function GET(
       }, { status: 401 });
     }
 
-    // Получаем товар
+    // Получаем товар (поддерживаем как внутренний ID, так и wbNmId)
     const product = await safePrismaOperation(
-      () => prisma.product.findUnique({
-        where: { id: params.id },
+      () => prisma.product.findFirst({
+        where: {
+          OR: [
+            { id: params.id },
+            { wbNmId: params.id }
+          ],
+          userId: user.id
+        },
         select: {
           id: true,
           userId: true,
@@ -211,6 +226,7 @@ export async function GET(
           inTransit: true,
           inReturn: true,
           wbData: true,
+          wbNmId: true,
           productCabinets: {
             where: { isSelected: true },
             select: {
@@ -247,7 +263,7 @@ export async function GET(
     const wbData = product.wbData as any;
     const barcode = wbData?.barcode;
 
-    if (barcode && product.productCabinets.length > 0) {
+    if (product.wbNmId && product.productCabinets.length > 0) {
       const cabinet = product.productCabinets[0].cabinet;
 
       if (cabinet && cabinet.apiToken && cabinet.isActive) {
@@ -259,28 +275,14 @@ export async function GET(
             const warehouses = warehousesResult.data;
             wbStocks = [];
 
-            // Получаем остатки по каждому складу
-            for (const warehouse of warehouses) {
-              if (warehouse.id) {
-                const stockResult = await wbApiService.getProductStock(
-                  cabinet.apiToken,
-                  warehouse.id
-                );
+            // Получаем остатки товара по nmId
+            const stockResult = await wbApiService.getProductStock(
+              cabinet.apiToken,
+              parseInt(product.wbNmId!)
+            );
 
-                if (stockResult.success && stockResult.data?.stocks) {
-                  const productStock = stockResult.data.stocks.find(
-                    (s: any) => s.sku === barcode
-                  );
-
-                  if (productStock) {
-                    wbStocks.push({
-                      warehouseId: warehouse.id,
-                      warehouseName: warehouse.name,
-                      amount: productStock.amount
-                    });
-                  }
-                }
-              }
+            if (stockResult.success && stockResult.data?.wbStocks) {
+              wbStocks = stockResult.data.wbStocks;
             }
           }
         } catch (error) {

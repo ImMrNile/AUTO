@@ -1,4 +1,4 @@
-// src/app/api/analytics/sync/route.ts - API для синхронизации аналитики товаров с WB
+﻿// src/app/api/analytics/sync/route.ts - API для синхронизации аналитики товаров с WB
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
@@ -6,8 +6,16 @@ import { safePrismaOperation } from '../../../../../lib/prisma-utils';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { WbProductAnalyticsService } from '../../../../../lib/services/wbProductAnalyticsService';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 /**
  * POST - Синхронизация аналитики для товаров пользователя
+ * 
+ * ВАЖНО: Для больших объемов (>50 товаров) используйте фоновую синхронизацию:
+ * POST /api/analytics/sync-background
+ * 
+ * Этот endpoint синхронизирует максимум 50 товаров за раз.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -80,16 +88,23 @@ export async function POST(request: NextRequest) {
     console.log(`📦 Найдено ${products.length} товаров для синхронизации`);
 
     // Фильтруем товары, которые нужно синхронизировать
-    const productsToSync = forceSync 
-      ? products 
+    let productsToSync = forceSync
+      ? products
       : products.filter(p => {
           if (!p.analytics) return true; // Нет аналитики - синхронизируем
           
           const lastSync = p.analytics.lastSyncAt;
           const hoursSinceSync = (Date.now() - lastSync.getTime()) / (1000 * 60 * 60);
           
-          return hoursSinceSync >= 1; // Синхронизируем если прошло больше часа
+          return hoursSinceSync >= 6; // Синхронизируем если прошло больше 6 часов
         });
+
+    // ВАЖНО: Ограничиваем до 50 товаров за раз для соблюдения rate limits WB API
+    const MAX_PRODUCTS_PER_SYNC = 50;
+    if (productsToSync.length > MAX_PRODUCTS_PER_SYNC) {
+      console.log(`⚠️ Товаров для синхронизации: ${productsToSync.length}, ограничиваем до ${MAX_PRODUCTS_PER_SYNC}`);
+      productsToSync = productsToSync.slice(0, MAX_PRODUCTS_PER_SYNC);
+    }
 
     if (productsToSync.length === 0) {
       return NextResponse.json({
@@ -101,7 +116,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    console.log(`🔄 Синхронизация ${productsToSync.length} товаров`);
+    console.log(`🔄 Синхронизация ${productsToSync.length} товаров (из ${products.length} всего)`);
 
     // Создаем сервис аналитики
     const analyticsService = new WbProductAnalyticsService(cabinet.apiToken);
@@ -113,10 +128,12 @@ export async function POST(request: NextRequest) {
       .map(nmId => parseInt(nmId));
 
     // Получаем аналитику для всех товаров
+    // ВАЖНО: WB Analytics API имеет ОЧЕНЬ строгие rate limits
+    // Рекомендуется использовать фоновую синхронизацию через Inngest
     const analyticsData = await analyticsService.getBulkProductAnalytics(
       nmIds,
       daysBack,
-      1000 // Задержка 1 секунда между запросами
+      30000 // Задержка 30 секунд между запросами (увеличено с 10с из-за 429 ошибок)
     );
 
     // Сохраняем данные в БД

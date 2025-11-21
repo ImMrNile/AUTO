@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useAuth } from '../../components/AuthProvider';
+import { useAuth } from '../../components/Auth';
 
 export default function AuthDebugPage() {
   const { user, loading, authError, refreshUser } = useAuth();

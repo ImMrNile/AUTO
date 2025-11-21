@@ -1,8 +1,11 @@
-// src/app/api/wb/stocks-enhanced/route.ts
+﻿// src/app/api/wb/stocks-enhanced/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { wbApiService } from '../../../../../lib/services/wbApiService';
 import { prisma } from '../../../../../lib/prisma';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // Простой in-memory кеш для остатков (TTL 5 минут)
 const stocksCache = new Map<string, { data: any; timestamp: number }>();

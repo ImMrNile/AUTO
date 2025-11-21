@@ -1,9 +1,12 @@
-// src/app/api/auth/repair-session/route.ts
+﻿// src/app/api/auth/repair-session/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '../../../../../lib/supabase/server';
 import { prisma } from '../../../../../lib/prisma';
 import { cookies } from 'next/headers';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {

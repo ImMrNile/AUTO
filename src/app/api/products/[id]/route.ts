@@ -6,6 +6,9 @@ import { safePrismaOperation } from '../../../../../lib/prisma-utils';
 import { AuthService } from '../../../../../lib/auth/auth-service';
 import { unifiedAISystem } from '../../../../../lib/services/unifiedAISystem';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 // GET метод для получения полной информации о товаре
 export async function GET(
   request: NextRequest,
@@ -347,6 +350,58 @@ export async function PUT(
     return NextResponse.json({
       success: false,
       error: 'Ошибка обновления товара',
+      details: error instanceof Error ? error.message : 'Неизвестная ошибка'
+    }, { status: 500 });
+  }
+}
+
+// DELETE метод для удаления товара
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    console.log(`🗑️ Удаление товара ID: ${params.id}`);
+
+    const user = await AuthService.getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ 
+        error: 'Не авторизован'
+      }, { status: 401 });
+    }
+
+    // Удаляем товар (каскадное удаление связанных данных настроено в schema.prisma)
+    await safePrismaOperation(
+      () => prisma.product.delete({
+        where: { 
+          id: params.id,
+          userId: user.id // Проверка принадлежности
+        }
+      }),
+      'удаление товара'
+    );
+
+    console.log(`✅ Товар ${params.id} успешно удален`);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Товар успешно удален'
+    });
+
+  } catch (error) {
+    console.error('❌ Ошибка удаления товара:', error);
+    
+    // Проверяем, не найден ли товар
+    if (error instanceof Error && error.message.includes('Record to delete does not exist')) {
+      return NextResponse.json({
+        success: false,
+        error: 'Товар не найден или уже удален'
+      }, { status: 404 });
+    }
+    
+    return NextResponse.json({
+      success: false,
+      error: 'Ошибка удаления товара',
       details: error instanceof Error ? error.message : 'Неизвестная ошибка'
     }, { status: 500 });
   }

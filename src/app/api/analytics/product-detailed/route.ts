@@ -1,8 +1,11 @@
-// src/app/api/analytics/product-detailed/route.ts - Подробная аналитика товара
+﻿// src/app/api/analytics/product-detailed/route.ts - Подробная аналитика товара
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '../../../../../lib/prisma';
 import { AuthService } from '../../../../../lib/auth/auth-service';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {

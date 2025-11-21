@@ -4,6 +4,9 @@ import { prisma } from '../../../../../../lib/prisma';
 import { AuthService } from '../../../../../../lib/auth/auth-service';
 import { wbApiService } from '../../../../../../lib/services/wbApiService';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 // GET - Получить статус закрепления цены
 export async function GET(
   request: NextRequest,
@@ -207,7 +210,7 @@ export async function PATCH(
     if (Math.abs(currentWbPrice - lockedPrice) > 0.01) {
       console.log(`🔄 [Price Lock] Обнаружено изменение цены! Восстанавливаем ${lockedPrice}₽`);
       
-      const restoreResult = await wbApiService.setProductDiscountWithRetry(
+      const restoreResult = await wbApiService.setProductPriceWithRetry(
         cabinet.apiToken,
         parseInt(product.wbNmId),
         lockedPrice,

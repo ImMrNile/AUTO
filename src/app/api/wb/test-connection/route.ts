@@ -1,6 +1,9 @@
-// src/app/api/wb/test-connection/route.ts
+﻿// src/app/api/wb/test-connection/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {

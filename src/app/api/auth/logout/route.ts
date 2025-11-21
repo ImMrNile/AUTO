@@ -1,9 +1,12 @@
-// src/app/api/auth/logout/route.ts
+﻿// src/app/api/auth/logout/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createClient } from '@/lib/supabase/server';
 import { AuthService } from '../../../../../lib/auth/auth-service';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {

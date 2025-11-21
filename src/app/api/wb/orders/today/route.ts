@@ -1,8 +1,11 @@
-// src/app/api/wb/orders/today/route.ts
+﻿// src/app/api/wb/orders/today/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthService } from '../../../../../../lib/auth/auth-service';
 import { wbApiService } from '../../../../../../lib/services/wbApiService';
 import { prisma } from '../../../../../../lib/prisma';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 // GET - Получение заказов за сегодня
 export async function GET(request: NextRequest) {

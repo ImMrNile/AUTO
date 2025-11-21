@@ -446,6 +446,41 @@ export class WbConversionService {
   }
 
   /**
+   * Получение поисковых запросов для товара
+   */
+  async getProductSearchQueries(
+    nmId: number,
+    dateFrom: Date,
+    dateTo: Date
+  ): Promise<{ topQueries: any[]; totalQueries: number }> {
+    try {
+      console.log(`🔍 Получение поисковых запросов для товара ${nmId}`);
+
+      // Получаем данные из nm-report
+      const reportData = await this.getNmReport([nmId], dateFrom, dateTo);
+      
+      if (!reportData || reportData.length === 0) {
+        console.warn(`⚠️ Нет данных nm-report для товара ${nmId}`);
+        return { topQueries: [], totalQueries: 0 };
+      }
+
+      const productData = reportData[0];
+      
+      // WB API не предоставляет прямой доступ к поисковым запросам в nm-report
+      // Возвращаем пустой массив, так как для поисковых запросов нужен другой endpoint
+      console.log(`ℹ️ Поисковые запросы недоступны через nm-report API`);
+      
+      return {
+        topQueries: [],
+        totalQueries: 0
+      };
+    } catch (error) {
+      console.error('❌ Ошибка получения поисковых запросов:', error);
+      return { topQueries: [], totalQueries: 0 };
+    }
+  }
+
+  /**
    * Вспомогательная функция задержки
    */
   private delay(ms: number): Promise<void> {

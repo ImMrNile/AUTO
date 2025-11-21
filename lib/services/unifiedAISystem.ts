@@ -20,7 +20,8 @@ export const QUALITY_REQUIREMENTS = {
   SEO_TITLE_MAX_LENGTH: 60,
   MAX_RETRIES: 3,
   REQUEST_TIMEOUT: 180000, // 3 минуты
-  AGENT_TIMEOUT: 240000 // 4 минуты
+  AGENT1_TIMEOUT: 360000, // 6 минут для Agent 1 (анализ изображений и характеристик)
+  AGENT2_TIMEOUT: 300000  // 5 минут для Agent 2 (форматирование JSON)
 };
 
 // OpenAI Assistant API IDs
@@ -45,9 +46,9 @@ const PRICING = {
 // НАСТРОЙКИ RATE LIMITING
 const RATE_LIMIT_CONFIG = {
   DELAY_BETWEEN_AGENTS: 2000, // 2 секунды между агентами
-  MAX_IMAGES: 3, // Максимум 3 изображения вместо всех
+  MAX_IMAGES: 5, // Максимум 3 изображения вместо всех
   RETRY_DELAYS: [2000, 5000, 10000], // Задержки для повторных попыток: 2с, 5с, 10с
-  MAX_RETRIES: 3
+  MAX_RETRIES: 2
 };
 
 interface ProductInput {
@@ -283,6 +284,9 @@ export class UnifiedAISystem {
         
         // Вызываем OpenAI Responses API (Agent 1) с правильным форматом
         console.log(`📤 [${callId}] Отправка запроса к OpenAI Responses API в ${new Date().toISOString()}...`);
+        console.log(`⏳ [${callId}] БЕЗ ТАЙМАУТА - Agent 1 может работать сколько угодно`);
+        
+        // Убран таймаут - Agent 1 работает без ограничений по времени
         const response = await this.openai.responses.create({
           prompt: {
             id: ASSISTANT_IDS.AGENT1_ANALYSIS
@@ -291,23 +295,48 @@ export class UnifiedAISystem {
         } as any);
         
         console.log(`✅ [${callId}] Получен ответ от OpenAI Responses API в ${new Date().toISOString()}`);
+        console.log(`🔍 [${callId}] Тип ответа: ${typeof response}, ключи:`, Object.keys(response || {}));
   
         // Получаем результат
+        console.log(`🔍 [${callId}] Извлекаем результат из ответа...`);
+        console.log(`🔍 [${callId}] response.output:`, typeof (response as any).output);
+        console.log(`🔍 [${callId}] response.content:`, typeof (response as any).content);
+        
         let result = (response as any).output || (response as any).content;
-        if (!result) throw new Error('Пустой ответ от Агента 1 (Prompt API)');
+        
+        console.log(`🔍 [${callId}] Результат извлечен, тип: ${typeof result}, isArray: ${Array.isArray(result)}`);
+        
+        if (!result) {
+          console.error(`❌ [${callId}] Пустой ответ от Агента 1!`);
+          console.error(`❌ [${callId}] Полный response:`, JSON.stringify(response).substring(0, 1000));
+          throw new Error('Пустой ответ от Агента 1 (Prompt API)');
+        }
   
         // ИСПРАВЛЕНИЕ: Responses API возвращает массив с разными типами элементов
         // Нужно найти элемент с type="message" и извлечь content[0].text
         if (Array.isArray(result)) {
+          console.log(`📋 [${callId}] Результат - массив, длина: ${result.length}`);
+          console.log(`📋 [${callId}] Типы элементов:`, result.map((item: any) => item.type));
+          
           const messageItem = result.find((item: any) => item.type === 'message');
           if (messageItem && messageItem.content && messageItem.content[0]) {
+            console.log(`📋 [${callId}] Найден message item, content length: ${messageItem.content.length}`);
+            
             // Ищем текстовый контент
             const textContent = messageItem.content.find((c: any) => c.type === 'output_text' || c.text);
             if (textContent && textContent.text) {
               result = textContent.text;
               console.log('🔄 Извлечен текст из message content');
+              console.log(`📝 [${callId}] Длина текста: ${result.length} символов`);
+            } else {
+              console.warn(`⚠️ [${callId}] Текстовый контент не найден в message.content`);
+              console.log(`🔍 [${callId}] message.content:`, JSON.stringify(messageItem.content).substring(0, 500));
             }
+          } else {
+            console.warn(`⚠️ [${callId}] Message item не найден в массиве результатов`);
           }
+        } else {
+          console.log(`📝 [${callId}] Результат - не массив, используем как есть`);
         }
         
         // УПРОЩЕННАЯ ЛОГИКА: Agent 1 просто возвращает результат КАК ЕСТЬ
@@ -485,8 +514,8 @@ export class UnifiedAISystem {
         
         // Добавляем таймаут
         const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(`Agent 2 timeout after ${QUALITY_REQUIREMENTS.AGENT_TIMEOUT}ms`)), 
-          QUALITY_REQUIREMENTS.AGENT_TIMEOUT)
+          setTimeout(() => reject(new Error(`Agent 2 timeout after ${QUALITY_REQUIREMENTS.AGENT2_TIMEOUT}ms`)), 
+          QUALITY_REQUIREMENTS.AGENT2_TIMEOUT)
         );
         
         const response = await Promise.race([responsePromise, timeoutPromise]) as any;
@@ -554,6 +583,7 @@ export class UnifiedAISystem {
 
       } catch (error) {
         console.error(`❌ Попытка ${attempt} не удалась (Agent 2):`, error);
+        console.error(`❌ Error message:`, error instanceof Error ? error.message : String(error));
         
         // Логируем информацию об ошибке
         if (error instanceof Error) {
@@ -888,6 +918,34 @@ export class UnifiedAISystem {
       console.log(`📤 Передача данных от Agent 1 к Agent 2: ${JSON.stringify(agent1Result.data).substring(0, 200)}...`);
       
       const agent2StartTime = Date.now();
+      
+      // Если Agent 1 не удался после всех попыток, пропускаем Agent 2
+      if (!agent1Result.success) {
+        console.warn(`⚠️ Agent 1 не удался после всех попыток, пропускаем Agent 2`);
+        const agent2Result = {
+          success: false,
+          data: {
+            characteristics: [],
+            seoTitle: agent1Result.data.seo_название || input.productName,
+            seoDescription: agent1Result.data.описание || `${input.productName}. Описание будет дополнено позже.`
+          },
+          confidence: 0.1,
+          tokensUsed: 0,
+          cost: 0,
+          processingTime: 0
+        };
+        
+        const finalResult = this.mergeAssistantResults(
+          agent1Result,
+          agent2Result,
+          categoryCharacteristics,
+          startTime
+        );
+        
+        console.log(`\n⚠️ ПОСЛЕДОВАТЕЛЬНЫЙ ПОТОК ЗАВЕРШЕН С ОШИБКАМИ (Agent 1 failed)`);
+        return finalResult;
+      }
+      
       const agent2Result = await this.runAgent2_AssistantFormatting(input, agent1Result.data, categoryCharacteristics);
       const agent2EndTime = Date.now();
       

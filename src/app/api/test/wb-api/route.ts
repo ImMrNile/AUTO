@@ -1,6 +1,9 @@
-// src/app/api/test/wb-api/route.ts - Простой тест доступности WB API
+﻿// src/app/api/test/wb-api/route.ts - Простой тест доступности WB API
 
 import { NextRequest, NextResponse } from 'next/server';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/test/wb-api?token=YOUR_TOKEN

@@ -1,31 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { clientLogger } from '@/lib/logger';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-
-declare global {
-  interface Window {
-    Telegram?: {
-      WebApp: {
-        initData: string;
-        initDataUnsafe: {
-          user?: {
-            id: number;
-            first_name: string;
-            last_name?: string;
-            username?: string;
-            photo_url?: string;
-          };
-          auth_date: number;
-          hash: string;
-        };
-        ready: () => void;
-        expand: () => void;
-      };
-    };
-  }
-}
 
 export default function TelegramMiniAppAuth() {
   const [isLoading, setIsLoading] = useState(true);
@@ -33,8 +11,18 @@ export default function TelegramMiniAppAuth() {
   const router = useRouter();
 
   useEffect(() => {
+    let isAuthenticating = false;
+
     const authenticateWithTelegram = async () => {
+      // Предотвращаем множественные запросы
+      if (isAuthenticating) {
+        clientLogger.log('🔒 [Mini App Auth] Авторизация уже выполняется, пропускаем...');
+        return;
+      }
+
       try {
+        isAuthenticating = true;
+
         if (!window.Telegram?.WebApp) {
           setError('Не удалось определить Telegram Mini App');
           setIsLoading(false);
@@ -53,30 +41,64 @@ export default function TelegramMiniAppAuth() {
           return;
         }
 
-        console.log('Telegram Mini App auth, initData length:', initData.length);
+        clientLogger.log('📱 [Mini App Auth] Авторизация через Telegram Mini App');
+        clientLogger.log('📱 [Mini App Auth] initData length:', initData.length);
 
-        const response = await fetch('/api/auth/telegram', {
+        // Парсим данные пользователя из initData
+        const user = webApp.initDataUnsafe.user;
+        
+        if (!user) {
+          setError('Не удалось получить данные пользователя');
+          setIsLoading(false);
+          return;
+        }
+
+        clientLogger.log('📱 [Mini App Auth] User:', user);
+
+        const response = await fetch('/api/auth/telegram-login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ initData })
+          credentials: 'include',
+          body: JSON.stringify({
+            telegramId: user.id.toString(),
+            username: user.username || null,
+            firstName: user.first_name || null,
+            lastName: user.last_name || null,
+            initData: initData
+          })
         });
 
         const data = await response.json();
 
         if (data.success) {
-          localStorage.setItem('sessionToken', data.sessionToken);
-          localStorage.setItem('user', JSON.stringify(data.user));
-          router.push('/');
+          clientLogger.log('✅ [Mini App Auth] Авторизация успешна');
+          clientLogger.log('✅ [Mini App Auth] Пользователь:', data.user.name);
+          clientLogger.log('✅ [Mini App Auth] redirectTo:', data.redirectTo);
+          
+          // Сохраняем токен и данные пользователя
+          localStorage.setItem('authToken', data.token);
+          localStorage.setItem('userData', JSON.stringify(data.user));
+          
+          // Небольшая задержка для установки cookie
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          // Используем redirectTo из ответа API
+          const redirectPath = data.redirectTo || (data.hasCabinets ? '/' : '/onboarding');
+          clientLogger.log('🔄 [Mini App Auth] Редирект на:', redirectPath);
+          
+          window.location.href = redirectPath;
         } else {
-          setError(data.error || 'Ошибка авторизации');
+          clientLogger.error('❌ [Mini App Auth] Ошибка:', data.message);
+          setError(data.message || 'Ошибка авторизации');
         }
       } catch (error) {
-        console.error('Mini App auth error:', error);
+        clientLogger.error('❌ [Mini App Auth] Exception:', error);
         setError('Ошибка авторизации');
       } finally {
         setIsLoading(false);
+        isAuthenticating = false;
       }
     };
 

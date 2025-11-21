@@ -9,10 +9,6 @@ let initPromise: Promise<void> | null = null;
  * Вызывается вручную после подключения к БД
  */
 export async function initBackgroundTasks() {
-  // ВРЕМЕННО ОТКЛЮЧЕНО для снижения нагрузки на БД
-  console.log('⚠️ [Startup] Фоновые задачи временно отключены');
-  return;
-  
   if (isInitialized) {
     return;
   }

@@ -4,6 +4,9 @@ import { safePrismaOperation } from '../../../../../../lib/prisma-utils';
 import { AuthService } from '../../../../../../lib/auth/auth-service';
 import { wbApiService } from '../../../../../../lib/services/wbApiService';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }

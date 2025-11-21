@@ -416,235 +416,195 @@ export default function Step4Results({
       </div>
 
       {/* Основная информация товара */}
-      <div className="liquid-glass rounded-2xl border-2 border-gray-300 p-6 shadow-xl">
-        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-          <CheckCircle className="w-6 h-6 text-green-600" />
+      <div className="liquid-glass rounded-xl border-2 border-gray-300 p-3 sm:p-4 md:p-6 shadow-xl">
+        <h3 className="text-base sm:text-lg md:text-xl font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2">
+          <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-green-600" />
           Информация о товаре
         </h3>
         
-        <div className="grid md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Название товара</label>
-            <input
-              type="text"
-              value={aiResponse?.generatedName || ''}
-              onChange={(e) => onUpdateProductField('name', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
-              placeholder="Название товара"
-              disabled={isPublishing}
-            />
-          </div>
-          
-          <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Качество заполнения</label>
-            <div className="flex items-center gap-4 px-4 py-3 border-2 border-green-400 rounded-lg bg-green-50 shadow-sm">
-              <div className="text-3xl font-bold text-green-700">{stats.fillRate}%</div>
-              <div className="text-sm text-green-800 font-semibold">
-                {stats.editableFilled} из {stats.editable} редактируемых заполнено
-              </div>
+        {/* Название */}
+        <div className="mb-3">
+          <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Название товара</label>
+          <input
+            type="text"
+            value={aiResponse?.generatedName || ''}
+            onChange={(e) => onUpdateProductField('name', e.target.value)}
+            className="w-full px-3 py-2 sm:px-4 sm:py-2.5 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm caret-black"
+            placeholder="Название товара"
+            disabled={isPublishing}
+            style={{caretColor: 'black'}}
+          />
+        </div>
+        
+        {/* Качество заполнения */}
+        <div className="mb-3">
+          <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Качество заполнения</label>
+          <div className="flex items-center gap-2 sm:gap-3 px-3 py-2 sm:px-4 sm:py-2.5 border-2 border-green-400 rounded-lg bg-green-50">
+            <div className="text-xl sm:text-2xl font-bold text-green-700">{stats.fillRate}%</div>
+            <div className="text-xs sm:text-sm text-green-800 font-semibold">
+              {stats.editableFilled} из {stats.editable} заполнено
             </div>
           </div>
         </div>
         
         {/* Цены и остатки */}
-        <div className="grid md:grid-cols-5 gap-4 mt-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3">
           <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Цена без скидки (₽) *</label>
+            <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Цена без скидки *</label>
             <input
               type="number"
+              inputMode="decimal"
               value={aiResponse?.price || ''}
               onChange={(e) => onUpdateProductField('price', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              className="w-full px-2 py-2 sm:px-3 sm:py-2 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm caret-black"
               placeholder="0"
               min="0"
               disabled={isPublishing}
+              style={{caretColor: 'black'}}
             />
           </div>
           
           <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Цена со скидкой (₽)</label>
+            <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Цена со скидкой</label>
             <input
               type="number"
+              inputMode="decimal"
               value={aiResponse?.discountPrice || ''}
               onChange={(e) => onUpdateProductField('discountPrice', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              className="w-full px-2 py-2 sm:px-3 sm:py-2 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm caret-black"
               placeholder="0"
               min="0"
               disabled={isPublishing}
+              style={{caretColor: 'black'}}
             />
           </div>
           
           <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Себестоимость (₽)</label>
+            <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Себестоимость</label>
             <input
               type="number"
+              inputMode="decimal"
               value={aiResponse?.costPrice || ''}
               onChange={(e) => onUpdateProductField('costPrice', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              className="w-full px-2 py-2 sm:px-3 sm:py-2 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm caret-black"
               placeholder="0"
               min="0"
               disabled={isPublishing}
+              style={{caretColor: 'black'}}
             />
           </div>
           
           <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Остатки (шт) *</label>
+            <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Остатки *</label>
             <input
               type="number"
+              inputMode="numeric"
               value={aiResponse?.stock || ''}
               onChange={(e) => onUpdateProductField('stock', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              className="w-full px-2 py-2 sm:px-3 sm:py-2 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm caret-black"
               placeholder="0"
               min="0"
               disabled={isPublishing}
+              style={{caretColor: 'black'}}
             />
           </div>
           
           <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Резерв (шт)</label>
+            <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Резерв</label>
             <input
               type="number"
+              inputMode="numeric"
               value={aiResponse?.reserved || ''}
               onChange={(e) => onUpdateProductField('reserved', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              className="w-full px-2 py-2 sm:px-3 sm:py-2 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm caret-black"
               placeholder="0"
               min="0"
               disabled={isPublishing}
-            />
-          </div>
-        </div>
-        
-        {/* Габариты упаковки */}
-        <div className="grid md:grid-cols-4 gap-4 mt-4">
-          <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Длина (см)</label>
-            <input
-              type="number"
-              value={dimensions?.length || ''}
-              onChange={(e) => onUpdateProductField('length', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
-              placeholder="0"
-              min="0"
-              step="0.1"
-              disabled={isPublishing}
-            />
-          </div>
-          
-          <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Ширина (см)</label>
-            <input
-              type="number"
-              value={dimensions?.width || ''}
-              onChange={(e) => onUpdateProductField('width', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
-              placeholder="0"
-              min="0"
-              step="0.1"
-              disabled={isPublishing}
-            />
-          </div>
-          
-          <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Высота (см)</label>
-            <input
-              type="number"
-              value={dimensions?.height || ''}
-              onChange={(e) => onUpdateProductField('height', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
-              placeholder="0"
-              min="0"
-              step="0.1"
-              disabled={isPublishing}
-            />
-          </div>
-          
-          <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Вес (кг)</label>
-            <input
-              type="number"
-              value={dimensions?.weight || ''}
-              onChange={(e) => onUpdateProductField('weight', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
-              placeholder="0"
-              min="0"
-              step="0.1"
-              disabled={isPublishing}
+              style={{caretColor: 'black'}}
             />
           </div>
         </div>
         
         {/* Габариты товара */}
-        <div className="grid md:grid-cols-4 gap-4 mt-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mt-3">
           <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Длина (см)</label>
+            <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Длина (см)</label>
             <input
               type="number"
+              inputMode="decimal"
               value={dimensions?.length || ''}
               onChange={(e) => onUpdateProductField('length', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              className="w-full px-2 py-2 sm:px-3 sm:py-2 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm caret-black"
               placeholder="0"
               min="0"
               step="0.1"
               disabled={isPublishing}
+              style={{caretColor: 'black'}}
             />
           </div>
           
           <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Ширина (см)</label>
+            <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Ширина (см)</label>
             <input
               type="number"
+              inputMode="decimal"
               value={dimensions?.width || ''}
               onChange={(e) => onUpdateProductField('width', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              className="w-full px-2 py-2 sm:px-3 sm:py-2 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm caret-black"
               placeholder="0"
               min="0"
               step="0.1"
               disabled={isPublishing}
+              style={{caretColor: 'black'}}
             />
           </div>
           
           <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Высота (см)</label>
+            <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Высота (см)</label>
             <input
               type="number"
+              inputMode="decimal"
               value={dimensions?.height || ''}
               onChange={(e) => onUpdateProductField('height', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              className="w-full px-2 py-2 sm:px-3 sm:py-2 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm caret-black"
               placeholder="0"
               min="0"
               step="0.1"
               disabled={isPublishing}
+              style={{caretColor: 'black'}}
             />
           </div>
           
           <div>
-            <label className="text-sm font-semibold text-gray-700 block mb-2">Вес (кг)</label>
+            <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Вес (кг)</label>
             <input
               type="number"
+              inputMode="decimal"
               value={dimensions?.weight || ''}
               onChange={(e) => onUpdateProductField('weight', e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
+              className="w-full px-2 py-2 sm:px-3 sm:py-2 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm caret-black"
               placeholder="0"
               min="0"
               step="0.01"
               disabled={isPublishing}
+              style={{caretColor: 'black'}}
             />
           </div>
         </div>
         
-        <div className="mt-4">
-          <label className="text-sm font-semibold text-gray-700 block mb-2">Описание товара</label>
+        <div className="mt-3">
+          <label className="text-xs sm:text-sm font-semibold text-gray-700 block mb-1.5">Описание товара</label>
           <textarea
             value={aiResponse?.seoDescription || ''}
             onChange={(e) => onUpdateProductField('description', e.target.value)}
-            rows={4}
-            className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg bg-white/80 text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-medium"
-            placeholder="Описание товара для покупателей..."
+            rows={3}
+            className="w-full px-3 py-2 sm:px-4 sm:py-2.5 border-2 border-purple-200 rounded-lg bg-white text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all text-sm resize-none caret-black"
+            placeholder="Описание товара..."
             disabled={isPublishing}
+            style={{caretColor: 'black'}}
           />
-          <div className="flex items-center justify-between mt-2 text-xs text-gray-600 font-medium">
-            <span>Рекомендуемая длина: 1300-2000 символов</span>
-            <span className="font-semibold">{(aiResponse?.seoDescription || '').length} символов</span>
+          <div className="flex items-center justify-end mt-1 text-xs text-gray-600">
+            <span className="font-semibold">{(aiResponse?.seoDescription || '').length} симв.</span>
           </div>
         </div>
       </div>

@@ -1,7 +1,10 @@
-// src/app/api/init/route.ts - Инициализация фоновых задач при старте сервера
+﻿// src/app/api/init/route.ts - Инициализация фоновых задач при старте сервера
 import { NextResponse } from 'next/server';
 import { initBackgroundTasks } from '../../../../lib/startup/initBackgroundTasks';
 import { prisma } from '../../../../lib/prisma';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 let isInitialized = false;
 
