@@ -269,10 +269,45 @@ async function sendInitialMessage(chat: any, product: any, weeklyBudget: number,
       apiKey: process.env.OPENAI_API_KEY,
     });
 
-    // ВРЕМЕННО ОТКЛЮЧЕНО: Получаем расширенные данные оптимизации
-    // TODO: Исправить авторизацию для внутренних запросов
-    console.log(`   ⏭️ Пропускаем загрузку данных оптимизации (временно отключено)`);
+    // Получаем расширенные данные оптимизации (поисковые запросы, конверсии, кампании)
+    console.log(`   🔍 Загрузка данных оптимизации (до 12 недель)...`);
     let optimizationData: any = null;
+    
+    if (cabinet?.apiToken && product.wbNmId) {
+      try {
+        // Вызываем API напрямую (внутренний запрос)
+        const baseUrl = process.env.VERCEL_URL 
+          ? `https://${process.env.VERCEL_URL}` 
+          : 'http://localhost:3000';
+        
+        const response = await fetch(`${baseUrl}/api/products/${product.id}/smart-optimization-data`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${process.env.CRON_SECRET || 'internal'}`,
+            'x-internal-request': 'true'
+          }
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          optimizationData = result.data || result.rawData;
+          
+          console.log(`   ✅ Данные оптимизации загружены:`);
+          console.log(`      • Поисковые запросы: ${optimizationData?.searchQueries?.length || 0}`);
+          console.log(`      • Конверсии: ${optimizationData?.conversionData?.length || 0} периодов`);
+          console.log(`      • Кампании: ${optimizationData?.campaignStats?.length || 0}`);
+          console.log(`      • Ключевые слова: ${optimizationData?.keywordStats?.length || 0}`);
+          console.log(`      • Воронка продаж: ${optimizationData?.salesFunnel?.length || 0} дней`);
+        } else {
+          console.warn(`   ⚠️ Не удалось загрузить данные оптимизации: ${response.status}`);
+        }
+      } catch (error) {
+        console.error(`   ❌ Ошибка загрузки данных оптимизации:`, error);
+        // Продолжаем без данных оптимизации
+      }
+    } else {
+      console.warn(`   ⚠️ Пропускаем загрузку данных оптимизации: нет API токена или nmId`);
+    }
 
     // Формируем сообщение с данными товара
     console.log(`   ✓ Данные товара: название, цены, характеристики`);
@@ -361,6 +396,13 @@ ${topKeywords.map((k: any, i: number) =>
 - Категория: ${product.subcategory?.name || 'не указана'}
 - Цена: ${product.price || 0}₽
 - Цена со скидкой: ${product.discountPrice || 0}₽
+${optimizationData ? `
+Данные оптимизации (последние недели):
+- Поисковые запросы: ${optimizationData.searchQueries?.length || 0}
+- Заказов за период: ${optimizationData.conversionData?.reduce((sum: number, c: any) => sum + (c.statistic?.selected?.orderCount || 0), 0) || 0}
+- Просмотров за период: ${optimizationData.conversionData?.reduce((sum: number, c: any) => sum + (c.statistic?.selected?.openCount || 0), 0) || 0}
+- Активных кампаний: ${optimizationData.campaignStats?.filter((c: any) => c.status === 9)?.length || 0}
+` : ''}
 
 Твоя задача:
 1. Проанализируй товар

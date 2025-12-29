@@ -394,7 +394,7 @@ export async function POST(request: NextRequest) {
     // 🔥 НОВАЯ ЛОГИКА: ИИ анализ БЕЗ сохранения в БД
     await updateTaskStatus('ANALYZING', 50, 'ИИ анализ характеристик', productId);
     
-    let aiResult = null;
+    let aiResult: any = null as any;
     let aiAnalysisStatus = 'failed';
     
     try {
@@ -446,6 +446,46 @@ export async function POST(request: NextRequest) {
         console.log('✅ ИИ данные сохранены в БД');
       } catch (saveError) {
         console.error('❌ Ошибка сохранения ИИ данных:', saveError);
+      }
+      
+      // 💾 СОХРАНЕНИЕ РЕЗУЛЬТАТОВ АГЕНТОВ В ТАБЛИЦУ product_creation_tasks
+      if (taskId) {
+        console.log('💾 Сохранение результатов Agent1 и Agent2 в таблицу product_creation_tasks...');
+        try {
+          await safePrismaOperation(
+            () => prisma.productCreationTask.update({
+              where: { id: taskId },
+              data: {
+                // Agent1 результаты (анализ изображения)
+                agent1Result: aiResult?.analysisReport ? {
+                  success: true,
+                  processingTime: aiResult.analysisReport.agent1Time || 0,
+                  confidence: aiResult.confidence || 0,
+                  completedAt: new Date().toISOString()
+                } : null,
+                agent1Status: 'COMPLETED',
+                agent1CompletedAt: new Date(),
+                
+                // Agent2 результаты (характеристики и SEO)
+                agent2Result: {
+                  characteristics: aiResult!.characteristics || [],
+                  seoTitle: aiResult!.seoTitle || '',
+                  seoDescription: aiResult!.seoDescription || '',
+                  qualityMetrics: aiResult!.qualityMetrics,
+                  confidence: aiResult!.confidence || 0,
+                  processingTime: aiResult!.analysisReport.agent2Time || 0,
+                  completedAt: new Date().toISOString()
+                },
+                agent2Status: 'COMPLETED',
+                agent2CompletedAt: new Date()
+              }
+            }),
+            'сохранение результатов агентов'
+          );
+          console.log('✅ Результаты Agent1 и Agent2 сохранены в product_creation_tasks');
+        } catch (saveError) {
+          console.error('❌ Ошибка сохранения результатов агентов:', saveError);
+        }
       }
       
     } catch (aiError) {
