@@ -10,20 +10,25 @@ import { WbFinancialCalculator } from '@/lib/services/wbFinancialCalculator';
 import { WbConversionService } from '@/lib/services/wbConversionService';
 import { WbReportService } from '@/lib/services/wbReportService';
 import { WbTariffService } from '@/lib/services/wbTariffService'; // ✅ Для получения KTR
+import { WbPenaltiesService } from '@/lib/services/wbPenaltiesService'; // ✅ Для актуальных штрафов и удержаний
 import { AnalyticsCalculator } from '@/lib/services/analyticsCalculator'; // ✅ Новый расчет из БД
 import { WbAnalyticsEngine } from '@/lib/services/wbAnalyticsEngine'; // ✅ Комплексный движок аналитики
 import { getCached, setCached } from '@/lib/cache/redis'; // ✅ Redis кеширование
+import { CacheService } from '@/lib/services/cacheService'; // ✅ Кеширование в БД
+
+export const runtime = "nodejs";
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic';
 
 // НАСТРОЙКИ КЕШИРОВАНИЯ И RATE LIMITING
+// WB API имеет строгие лимиты: ~1 запрос в минуту для некоторых эндпоинтов
 const CACHE_CONFIG = {
   CACHE_TTL: 6 * 60 * 60 * 1000, // 6 часов
-  DELAY_BETWEEN_REQUESTS: 1000, // 1000ms между запросами (увеличено для безопасности)
-  MIN_DELAY_BETWEEN_REQUESTS: 200, // Минимальная задержка согласно WB API
-  RETRY_DELAYS: [2000, 5000, 10000, 20000], // 2с, 5с, 10с, 20с (увеличено)
-  MAX_RETRIES: 3
+  DELAY_BETWEEN_REQUESTS: 3000, // 3000ms между запросами (увеличено для WB rate limits)
+  MIN_DELAY_BETWEEN_REQUESTS: 1000, // Минимальная задержка 1 секунда
+  RETRY_DELAYS: [35000, 60000, 90000, 120000], // 35с, 60с, 90с, 120с (WB рекомендует 35с)
+  MAX_RETRIES: 4
 };
 
 // Глобальный счетчик для отслеживания оставшихся запросов
@@ -130,7 +135,9 @@ interface AnalyticsDashboardData {
       returnsCount: number; // Количество возвратов
       totalStorage: number;
       totalAcceptance: number;
-      totalOtherDeductions: number; // Штрафы, корректировки и прочие вычеты WB
+      totalPenalty: number; // Штрафы WB
+      totalDeduction: number; // 🔥 Корректировка ВВ (удержания)
+      totalOtherDeductions: number; // Прочие вычеты WB
       totalWbExpenses: number;
       totalCost: number; // Себестоимость товаров
       totalTaxes: number; // Налоги
@@ -168,8 +175,16 @@ interface AnalyticsDashboardData {
     }>;
     salesByDay: Array<{
       date: string;
-      revenue: number;
-      orders: number;
+      revenue: number;      // Выручка от выкупов
+      orders: number;       // Количество выкупов (из детализированного отчета)
+      orderCount?: number;  // Количество заказов (из воронки продаж)
+      orderSum?: number;    // Сумма заказов
+      buyoutCount?: number; // Количество выкупов (из воронки продаж)
+      buyoutSum?: number;   // Сумма выкупов
+      fbsBuyouts?: number;  // Выкупы FBS
+      fbwBuyouts?: number;  // Выкупы FBW
+      fbsRevenue?: number;  // Выручка FBS
+      fbwRevenue?: number;  // Выручка FBW
     }>;
   };
   
@@ -178,18 +193,28 @@ interface AnalyticsDashboardData {
     totalProducts: number;
     totalStock: number;
     lowStockProducts: number;
+    lowStockProductsList?: Array<{
+      nmId: number;
+      quantity: number;
+      warehouseName: string;
+      title: string;
+    }>;
     inTransit: number; // В пути к клиенту
     inReturn: number; // В пути от клиента (возвраты)
     reserved: number;
     stockValue: number;
     fbwStock: number; // Остатки на складах WB (FBW)
     fbsStock: number; // Остатки на складах продавца (FBS)
+    fbwTotal?: number; // FBW всего (на складе + в пути)
+    fbwInTransitToClient?: number; // FBW товары в пути к клиенту
+    fbwInTransitFromClient?: number; // FBW товары в пути от клиента
     warehouseDetails: Array<{
       name: string;
+      type: string; // 'FBS' или 'FBW'
       quantity: number;
       inWayToClient: number;
       inWayFromClient: number;
-      isFBW: boolean;
+      total: number; // quantity + inWayToClient + inWayFromClient
     }>;
   };
   
@@ -268,29 +293,55 @@ export async function GET(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // ВАЖНО: При forceRefresh обновляем остатки из WB API перед загрузкой аналитики
+    if (forceRefresh) {
+      console.log(`🔄 [Force Refresh] Обновление остатков из WB API перед загрузкой аналитики...`);
+      try {
+        const baseUrl = process.env.VERCEL_URL 
+          ? `https://${process.env.VERCEL_URL}`
+          : 'http://localhost:3000';
+        
+        const stocksResponse = await fetch(`${baseUrl}/api/wb/stocks?cabinetId=${cabinet.id}`, {
+          headers: {
+            'Cookie': request.headers.get('Cookie') || ''
+          }
+        });
+        
+        if (stocksResponse.ok) {
+          const stocksData = await stocksResponse.json();
+          console.log(`✅ [Force Refresh] Остатки обновлены: FBS=${stocksData.summary?.fbsTotal || 0}, FBW=${stocksData.summary?.fbwTotal || 0}`);
+        } else {
+          console.warn(`⚠️ [Force Refresh] Ошибка обновления остатков: ${stocksResponse.status}`);
+        }
+      } catch (error) {
+        console.error(`❌ [Force Refresh] Не удалось обновить остатки:`, error);
+      }
+    }
+
     console.log(`✅ Работаем с кабинетом: ${cabinet.name || cabinet.id}`);
 
-    // ============ REDIS КЕШИРОВАНИЕ ============
-    const cacheKey = `analytics:${user.id}:${cabinet.id}:${days}`;
+    // ============ БД КЕШИРОВАНИЕ (STALE-WHILE-REVALIDATE) ============
+    const cacheKey = CacheService.createAnalyticsKey(user.id, cabinet.id, days);
+    const CACHE_TTL_MINUTES = 60; // 1 час TTL
     
+    // Проверяем кеш в БД (если не принудительное обновление)
     if (!forceRefresh) {
-      const cached = await getCached<{ data: any; timestamp: number }>(cacheKey);
+      const cached = await CacheService.get<any>(cacheKey);
       
       if (cached) {
-        const cacheAge = Math.round((Date.now() - cached.timestamp) / 60000);
-        console.log(`✅ Cache HIT: Аналитика взята из Redis кеша (возраст: ${cacheAge} мин)`);
-        
+        console.log(`✅ [DB Cache] Данные найдены в кеше БД`);
         return NextResponse.json({
           success: true,
-          data: cached.data,
+          data: cached,
           fromCache: true,
-          cacheAge
+          message: 'Данные из кеша. Нажмите "Обновить" для получения свежих данных.'
         });
       } else {
-        console.log('⚠️ Cache MISS: Кеш отсутствует, загружаем свежие данные из WB API...');
+        console.log('⚠️ [DB Cache] Кеш отсутствует или истек, загружаем свежие данные из WB API...');
       }
     } else {
-      console.log('🔄 Принудительное обновление данных (forceRefresh=true)');
+      console.log('🔄 [DB Cache] Принудительное обновление данных (forceRefresh=true), удаляем старый кеш...');
+      await CacheService.delete(cacheKey);
     }
 
     // Рассчитываем временной период
@@ -351,6 +402,12 @@ export async function GET(request: NextRequest) {
       console.log(`✅ Получено ${detailedReport.length} записей из детализированного отчета`);
       await delay(CACHE_CONFIG.DELAY_BETWEEN_REQUESTS);
       
+      // ✅ ВАЖНО: Дополнительно загружаем выкупы из старого API для актуальных данных за последние дни
+      // Детализированный отчет WB формируется с задержкой и не содержит данные за последние 2-3 дня
+      salesData = await getWBSales(cabinet.apiToken, startDate, endDate);
+      console.log(`✅ Получено ${salesData.length} выкупов из старого API (для актуальных данных)`);
+      await delay(CACHE_CONFIG.DELAY_BETWEEN_REQUESTS);
+      
       // ✅ Для сравнения используем старый API (previousSalesData)
       // previousDetailedReport не нужен, так как не используется в расчетах
       previousSalesData = await getWBSales(cabinet.apiToken, previousStartDate, startDate);
@@ -367,8 +424,31 @@ export async function GET(request: NextRequest) {
       await delay(CACHE_CONFIG.DELAY_BETWEEN_REQUESTS);
     }
     
+    // Получаем баркоды товаров из БД для корректного расчета остатков
+    const productsForBarcodes = await prismaAnalytics.product.findMany({
+      where: {
+        userId: user.id,
+        wbNmId: { not: null }
+      },
+      select: {
+        barcode: true,
+        barcodes: true
+      }
+    });
+    
+    const allBarcodes: string[] = [];
+    for (const product of productsForBarcodes) {
+      if (product.barcodes && Array.isArray(product.barcodes)) {
+        const validBarcodes = (product.barcodes as string[]).filter((b: any) => typeof b === 'string');
+        allBarcodes.push(...validBarcodes);
+      } else if (product.barcode && typeof product.barcode === 'string') {
+        allBarcodes.push(product.barcode);
+      }
+    }
+    console.log(`📦 Найдено ${allBarcodes.length} баркодов для загрузки остатков`);
+    
     // Получаем остатки, заказы и товары (для всех периодов)
-    const stocksData = await getWBStocks(cabinet.apiToken);
+    const stocksData = await getWBStocks(cabinet.apiToken, allBarcodes, user.id, cabinet.id);
     console.log(`✅ Получено остатков: ${stocksData.length}`);
     await delay(CACHE_CONFIG.DELAY_BETWEEN_REQUESTS);
     
@@ -449,19 +529,29 @@ export async function GET(request: NextRequest) {
     }
 
     // Собираем аналитику (гибридный режим)
-    const analyticsResult = await buildAnalyticsDashboard(
-      salesData,
-      previousSalesData,
-      stocksData,
-      ordersData,
-      productsData,
-      { start: startDate.toISOString(), end: endDate.toISOString() },
-      user,
-      cabinet.apiToken,
-      useDetailedReport ? detailedReport : undefined,
-      days,
-      request
-    );
+    console.log('🔄 НАЧИНАЕМ buildAnalyticsDashboard...');
+    console.log(`📊 Параметры: salesData=${salesData.length}, previousSalesData=${previousSalesData.length}, stocksData=${stocksData.length}, ordersData=${ordersData.length}, productsData=${productsData.length}`);
+    
+    let analyticsResult;
+    try {
+      analyticsResult = await buildAnalyticsDashboard(
+        salesData,
+        previousSalesData,
+        stocksData,
+        ordersData,
+        productsData,
+        { start: startDate.toISOString(), end: endDate.toISOString() },
+        user,
+        cabinet.apiToken,
+        useDetailedReport ? detailedReport : undefined,
+        days,
+        request
+      );
+      console.log('✅ buildAnalyticsDashboard ЗАВЕРШЕН успешно');
+    } catch (buildError) {
+      console.error('❌ ОШИБКА В buildAnalyticsDashboard:', buildError);
+      throw buildError;
+    }
 
     // ============ СОХРАНЕНИЕ В REDIS КЕШ ============
     const responseData = {
@@ -477,9 +567,9 @@ export async function GET(request: NextRequest) {
       returnsCount: analyticsResult.financial?.expenses?.returnsCount
     });
 
-    // Сохраняем в Redis с TTL 3600 секунд (1 час)
-    await setCached(cacheKey, { data: analyticsResult, timestamp: Date.now() }, 3600);
-    console.log(`✅ Аналитика сохранена в Redis кеш на 1 час`);
+    // Сохраняем в БД кеш с TTL 60 минут
+    await CacheService.set(cacheKey, analyticsResult, CACHE_TTL_MINUTES);
+    console.log(`✅ [DB Cache] Аналитика сохранена в БД кеш на ${CACHE_TTL_MINUTES} минут`);
 
     return NextResponse.json({
       success: true,
@@ -583,31 +673,217 @@ async function getWBOrders(apiToken: string, startDate: Date, endDate: Date): Pr
 
 /**
  * Получение остатков с retry логикой
+ * 
+ * ВАЖНО: Для получения ПОЛНОГО остатка нужно указать максимально раннюю дату в dateFrom
+ * Согласно документации WB API: "Для получения полного остатка следует указывать максимально раннее значение"
+ * 
+ * Ответ содержит поля:
+ * - quantity: количество на складе
+ * - inWayToClient: в пути к клиенту
+ * - inWayFromClient: в пути от клиента (возвраты)
+ * - quantityFull: общее количество (quantity + inWayToClient + inWayFromClient)
  */
-async function getWBStocks(apiToken: string): Promise<any[]> {
+/**
+ * Получение остатков напрямую из WB API
+ * Использует ту же логику, что и /api/wb/stocks:
+ * 1. FBS остатки через /api/v3/stocks/{warehouseId}
+ * 2. FBW остатки через Statistics API
+ * 3. Товары в пути (inTransit, inReturn) из Statistics API
+ */
+async function getWBStocks(apiToken: string, barcodes?: string[], userId?: string, cabinetId?: string): Promise<any[]> {
   try {
-    const dateFrom = new Date().toISOString().split('T')[0];
-    const url = `https://statistics-api.wildberries.ru/api/v1/supplier/stocks?dateFrom=${dateFrom}`;
+    console.log(`📦 [Dashboard Stocks] Загрузка остатков напрямую из WB API...`);
     
-    const response = await fetchWithRetry(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': apiToken,
-        'User-Agent': 'WB-AI-Assistant/2.0'
-      }
-    });
-
-    if (!response.ok) {
-      console.warn(`⚠️ Не удалось получить остатки: ${response.status}`);
-      return [];
+    const { wbApiService } = await import('../../../../../lib/services/wbApiService');
+    const allStocks: any[] = [];
+    
+    // ШАГ 1: Получаем список складов для определения FBS склада
+    let warehouses: any[] = [];
+    try {
+      warehouses = await wbApiService.getWarehouses(apiToken);
+      console.log(`📦 [Dashboard Stocks] Получено складов: ${warehouses.length}`);
+    } catch (error) {
+      console.warn('⚠️ [Dashboard Stocks] Не удалось загрузить список складов:', error);
     }
-
-    const data = await response.json();
-    return data || [];
+    
+    // ШАГ 2: Получаем FBS остатки через /api/v3/stocks/{warehouseId}
+    const fbsStocksByNmId = new Map<number, number>();
+    const fbsWarehouse = warehouses.find((w: any) => w.deliveryType === 1);
+    
+    if (fbsWarehouse && userId) {
+      console.log(`📦 [Dashboard Stocks] Найден FBS склад: ${fbsWarehouse.name} (ID: ${fbsWarehouse.id})`);
+      
+      // Получаем баркоды товаров из БД
+      const products = await prisma.product.findMany({
+        where: {
+          userId,
+          wbNmId: { not: null }
+        },
+        select: {
+          id: true,
+          wbNmId: true,
+          barcode: true,
+          barcodes: true
+        }
+      });
+      
+      const allBarcodes: string[] = [];
+      for (const product of products) {
+        if (product.barcodes && Array.isArray(product.barcodes)) {
+          const validBarcodes = product.barcodes.filter((b: any) => typeof b === 'string');
+          allBarcodes.push(...validBarcodes);
+        } else if (product.barcode && typeof product.barcode === 'string') {
+          allBarcodes.push(product.barcode);
+        }
+      }
+      
+      if (allBarcodes.length > 0) {
+        console.log(`📦 [Dashboard Stocks] Загрузка FBS остатков для ${allBarcodes.length} баркодов...`);
+        try {
+          const fbsStocksResponse = await fetch(
+            `${WB_API_CONFIG.BASE_URLS.MARKETPLACE}/api/v3/stocks/${fbsWarehouse.id}`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': apiToken,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              },
+              body: JSON.stringify({ skus: allBarcodes })
+            }
+          );
+          
+          if (fbsStocksResponse.ok) {
+            const fbsStocksData = await fbsStocksResponse.json();
+            console.log(`✅ [Dashboard Stocks] Получено FBS остатков: ${fbsStocksData.stocks?.length || 0} позиций`);
+            
+            if (fbsStocksData.stocks && Array.isArray(fbsStocksData.stocks)) {
+              for (const stock of fbsStocksData.stocks) {
+                if (stock.amount > 0) {
+                  const product = products.find(p => {
+                    if (p.barcodes && Array.isArray(p.barcodes)) {
+                      return p.barcodes.includes(stock.sku);
+                    }
+                    return p.barcode === stock.sku;
+                  });
+                  
+                  if (product && product.wbNmId) {
+                    const nmId = parseInt(product.wbNmId);
+                    const currentAmount = fbsStocksByNmId.get(nmId) || 0;
+                    fbsStocksByNmId.set(nmId, currentAmount + stock.amount);
+                  }
+                }
+              }
+              console.log(`📦 [Dashboard Stocks] FBS остатков по ${fbsStocksByNmId.size} товарам`);
+            }
+          }
+        } catch (fbsError) {
+          console.warn(`⚠️ [Dashboard Stocks] Ошибка загрузки FBS остатков:`, fbsError);
+        }
+      }
+    }
+    
+    // ШАГ 3: Получаем FBW остатки через Statistics API
+    console.log(`📦 [Dashboard Stocks] Загрузка FBW остатков через Statistics API...`);
+    const fbwStocks = await wbApiService.getStocks(apiToken);
+    
+    // ШАГ 4: Объединяем FBS и FBW остатки
+    const stocksByProduct = new Map<number, any>();
+    
+    if (fbwStocks && Array.isArray(fbwStocks)) {
+      console.log(`✅ [Dashboard Stocks] Получено FBW остатков: ${fbwStocks.length} записей`);
+      
+      fbwStocks.forEach((stock: any) => {
+        const nmId = stock.nmId || stock.nm_id;
+        if (!nmId) return;
+        
+        const fbsStock = fbsStocksByNmId.get(nmId) || 0;
+        const fbwStock = stock.quantity || 0;
+        const inTransitToClient = stock.inWayToClient || 0;
+        const inTransitFromClient = stock.inWayFromClient || 0;
+        
+        const existing = stocksByProduct.get(nmId);
+        if (existing) {
+          existing.fbwStock += fbwStock;
+          existing.inWayToClient += inTransitToClient;
+          existing.inWayFromClient += inTransitFromClient;
+        } else {
+          stocksByProduct.set(nmId, {
+            nmId,
+            vendorCode: stock.supplierArticle || stock.vendor_code || '',
+            warehouseName: stock.warehouseName || 'Склад WB',
+            fbsStock,
+            fbwStock,
+            inWayToClient: inTransitToClient,
+            inWayFromClient: inTransitFromClient,
+            quantity: fbwStock, // Только FBW на складе (без товаров в пути)
+            quantityFull: fbsStock + fbwStock,
+            warehouseType: fbsStock > 0 ? 'FBS' : 'FBW',
+            Price: 0
+          });
+        }
+      });
+    }
+    
+    // ШАГ 5: Добавляем товары с FBS остатками, которых нет в Statistics API
+    for (const [nmId, fbsAmount] of fbsStocksByNmId.entries()) {
+      if (!stocksByProduct.has(nmId)) {
+        stocksByProduct.set(nmId, {
+          nmId,
+          vendorCode: nmId.toString(),
+          warehouseName: fbsWarehouse?.name || 'FBS',
+          fbsStock: fbsAmount,
+          fbwStock: 0,
+          inWayToClient: 0,
+          inWayFromClient: 0,
+          quantity: fbsAmount,
+          quantityFull: fbsAmount,
+          warehouseType: 'FBS',
+          Price: 0
+        });
+      }
+    }
+    
+    // Преобразуем Map в массив
+    allStocks.push(...Array.from(stocksByProduct.values()));
+    
+    const fbsCount = allStocks.reduce((sum, s) => sum + (s.fbsStock || 0), 0);
+    const fbwCount = allStocks.reduce((sum, s) => sum + (s.fbwStock || 0), 0);
+    const fbwInWay = allStocks.reduce((sum, s) => sum + (s.inWayToClient || 0) + (s.inWayFromClient || 0), 0);
+    
+    console.log(`✅ [Dashboard Stocks] ИТОГО: ${allStocks.length} товаров`);
+    console.log(`   FBS: ${fbsCount} шт`);
+    console.log(`   FBW: ${fbwCount} шт на складе + ${fbwInWay} шт в пути`);
+    console.log(`   FBS: ${fbsCount} шт`);
+    
+    return allStocks;
   } catch (error) {
-    console.warn('⚠️ Ошибка получения остатков:', error);
+    console.error('❌ [Dashboard Stocks] Ошибка получения остатков:', error);
     return [];
   }
+}
+
+/**
+ * Определение типа склада на основе данных от WB API
+ */
+function determineWarehouseType(stock: any): string {
+  // Определяем тип склада на основе данных от WB API
+  if (stock.deliveryType === 1 || stock.delivery_type === 1) {
+    return 'FBS';
+  } else if (stock.deliveryType === 0 || stock.delivery_type === 0) {
+    return 'FBW';
+  } else if (stock.warehouseName?.toLowerCase().includes('фбс') || 
+             stock.warehouse_name?.toLowerCase().includes('фбс')) {
+    return 'FBS';
+  } else if (stock.warehouseName?.toLowerCase().includes('фбо') || 
+             stock.warehouse_name?.toLowerCase().includes('фбо') ||
+             stock.warehouseName?.toLowerCase().includes('wb') ||
+             stock.warehouse_name?.toLowerCase().includes('wb')) {
+    return 'FBW';
+  }
+  
+  // По умолчанию считаем FBW (склад WB)
+  return 'FBW';
 }
 
 /**
@@ -790,11 +1066,13 @@ async function buildAnalyticsDashboard(
   request?: NextRequest
 ): Promise<AnalyticsDashboardData> {
   
+  console.log('🔄 [buildAnalyticsDashboard] ШАГ 1: Получение KTR...');
   // ✅ Получаем KTR (коэффициент логистики) для всех складов
   console.log('📊 Получаем коэффициенты логистики (KTR) для складов...');
   const warehouseKtrMap = await WbTariffService.getWarehouseKtrMap(apiToken, false);
   console.log(`✅ Получены KTR для ${warehouseKtrMap?.size || 0} складов`);
   
+  console.log('🔄 [buildAnalyticsDashboard] ШАГ 2: Получение полных тарифов...');
   // ✅ Получаем ПОЛНЫЕ тарифы для расчета логистики
   const warehouseTariffsMap = await WbTariffService.getWarehouseTariffsMap(apiToken);
   console.log(`✅ Получены полные тарифы для ${warehouseTariffsMap?.size || 0} складов`);
@@ -811,6 +1089,7 @@ async function buildAnalyticsDashboard(
   let totalStorage = 0;
   let totalAcceptance = 0;
   let totalPenalty = 0;
+  let totalDeduction = 0; // 🔥 Корректировка ВВ (удержания)
   let totalAdvertising = 0; // 📢 Расходы на рекламу/продвижение
   let totalOtherDeductions = 0;
   let totalWbExpenses = 0;
@@ -824,10 +1103,12 @@ async function buildAnalyticsDashboard(
   
   // ✅ ДЛЯ ДЕТАЛИЗИРОВАННОГО ОТЧЕТА: Используем aggregateExpenses из WbReportService
   if (useDetailedReport) {
+    console.log('🔄 [buildAnalyticsDashboard] ШАГ 3: Детализированный отчет - получение габаритов...');
     // Получаем габариты товаров для расчетной логистики
     const nmIds = [...new Set(detailedReport!.map(item => item.nmId))];
     console.log(`📦 Ищем габариты для ${nmIds.length} уникальных товаров:`, nmIds.slice(0, 5));
     
+    console.log('🔄 [buildAnalyticsDashboard] ШАГ 3.1: Загрузка из БД...');
     // ШАГ 1: Пытаемся загрузить из БД
     const productsFromDb = await prismaAnalytics.product.findMany({
       where: {
@@ -879,6 +1160,7 @@ async function buildAnalyticsDashboard(
     // ШАГ 2: Если не все товары найдены в БД - загружаем из WB API
     const missingNmIds = nmIds.filter(nmId => !productDimensionsMap.has(nmId));
     if (missingNmIds.length > 0) {
+      console.log('🔄 [buildAnalyticsDashboard] ШАГ 3.2: Загрузка габаритов из WB API...');
       console.log(`📦 Загружаем габариты из WB API для ${missingNmIds.length} недостающих товаров...`);
       const dimensionsFromWB = await getProductDimensionsFromWB(apiToken, missingNmIds);
       
@@ -890,6 +1172,7 @@ async function buildAnalyticsDashboard(
       console.log(`📦 ИТОГО габаритов: ${productDimensionsMap.size} из ${nmIds.length} товаров`);
     }
     
+    console.log('🔄 [buildAnalyticsDashboard] ШАГ 3.3: Вызов aggregateExpenses...');
     const reportService = new WbReportService(apiToken);
     const aggregated = reportService.aggregateExpenses(
       detailedReport!,
@@ -906,6 +1189,7 @@ async function buildAnalyticsDashboard(
     totalStorage = aggregated.totalStorage;
     totalAcceptance = aggregated.totalAcceptance;
     totalPenalty = aggregated.totalPenalty;
+    totalDeduction = aggregated.totalDeduction; // 🔥 Корректировка ВВ
     totalAdvertising = aggregated.totalAdvertising; // 📢 Расходы на рекламу
     totalOtherDeductions = aggregated.totalOther;
     totalWbExpenses = aggregated.totalWbExpenses;
@@ -923,6 +1207,64 @@ async function buildAnalyticsDashboard(
       logisticsToClient,
       logisticsReturns
     });
+    
+    console.log('🔄 [buildAnalyticsDashboard] ШАГ 4: Добавление данных за последние дни...');
+    // ✅ ВАЖНО: Добавляем данные за последние дни из старого API (salesData)
+    // Детализированный отчет WB формируется с задержкой 2-3 дня
+    if (salesData && salesData.length > 0) {
+      // Находим последнюю дату в детализированном отчете
+      const detailedDates = detailedReport!.map(item => {
+        const dateStr = item.saleDt || item.sale_dt || item.orderDt || item.order_dt;
+        return dateStr ? new Date(dateStr).toISOString().split('T')[0] : null;
+      }).filter(Boolean);
+      const lastDetailedDate = detailedDates.length > 0 
+        ? (detailedDates.sort().reverse()[0] || '2000-01-01')
+        : '2000-01-01';
+      
+      console.log(`📊 Последняя дата в детализированном отчете: ${lastDetailedDate}`);
+      
+      // Фильтруем продажи из старого API, которые ПОСЛЕ последней даты детализированного отчета
+      const recentSales = salesData.filter((sale: any) => {
+        const saleDate = sale.date ? new Date(sale.date).toISOString().split('T')[0] : null;
+        return saleDate && saleDate > lastDetailedDate;
+      });
+      
+      if (recentSales.length > 0) {
+        console.log(`📊 Найдено ${recentSales.length} выкупов за последние дни (после ${lastDetailedDate})`);
+        
+        // Добавляем выручку и "к переводу" за последние дни
+        let recentRevenue = 0;
+        let recentForPay = 0;
+        let recentOrders = 0;
+        
+        recentSales.forEach((sale: any) => {
+          const isReturn = sale.isReturn || sale.saleID?.startsWith('R') || false;
+          const isCancel = sale.isCancel || false;
+          
+          if (!isReturn && !isCancel) {
+            recentRevenue += sale.finishedPrice || 0;
+            recentForPay += sale.forPay || sale.finishedPrice || 0;
+            recentOrders += 1;
+          }
+        });
+        
+        console.log(`📊 Добавляем за последние дни: выручка=${recentRevenue}₽, кПереводу=${recentForPay}₽, заказов=${recentOrders}`);
+        
+        // Добавляем к общим суммам
+        totalRevenue += recentRevenue;
+        totalForPay += recentForPay;
+        totalOrders += recentOrders;
+        
+        // Примерный расчет расходов для последних дней (комиссия = выручка - к переводу)
+        const recentCommission = recentRevenue - recentForPay;
+        totalWbCommission += recentCommission;
+        totalWbExpenses += recentCommission;
+        
+        console.log(`📊 ИТОГО после добавления последних дней: выручка=${totalRevenue}₽, кПереводу=${totalForPay}₽, заказов=${totalOrders}`);
+      } else {
+        console.log(`📊 Нет новых выкупов после ${lastDetailedDate}`);
+      }
+    }
   } else {
     // ДЛЯ СТАРОГО API: Используем AnalyticsCalculator
     // Получаем товары из БД
@@ -1040,6 +1382,8 @@ async function buildAnalyticsDashboard(
     productMap.set(String(p.wbNmId), {
       id: p.id,
       costPrice: p.costPrice,
+      discountPrice: p.discountPrice, // Цена со скидкой для расчета стоимости остатков
+      price: p.price, // Базовая цена (fallback)
       subcategory: p.subcategory
     });
   });
@@ -1157,14 +1501,92 @@ async function buildAnalyticsDashboard(
   const ordersChange = previousOrders > 0 ? ((totalOrders - previousOrders) / previousOrders) * 100 : 0;
   const profitChange = previousProfit > 0 ? ((totalProfit - previousProfit) / previousProfit) * 100 : 0;
 
-  // Агрегация продаж по дням
-  // Для ≥30 дней используем detailedReport, для <30 дней - salesData
-  const dataForChart = useDetailedReport ? detailedReport! : salesData;
-  const salesByDay = useDetailedReport 
-    ? aggregateSalesByDayFromDetailedReport(detailedReport!)
-    : aggregateSalesByDay(salesData);
+  // Агрегация ВЫКУПОВ по дням
+  // ГИБРИДНЫЙ ПОДХОД: объединяем данные из детализированного отчета и старого API
+  // Детализированный отчет содержит точные расходы, но формируется с задержкой 2-3 дня
+  // Старый API содержит актуальные выкупы, но без детальных расходов
+  let salesByDay: Array<{ date: string; revenue: number; orders: number; fbsBuyouts?: number; fbwBuyouts?: number; fbsRevenue?: number; fbwRevenue?: number }>;
   
-  console.log(`📊 salesByDay: ${salesByDay.length} дней, первый: ${salesByDay[0]?.date}, последний: ${salesByDay[salesByDay.length-1]?.date}`);
+  if (useDetailedReport && detailedReport.length > 0) {
+    // Получаем данные из детализированного отчета
+    const detailedSalesByDay = aggregateSalesByDayFromDetailedReport(detailedReport);
+    
+    // Получаем данные из старого API (актуальные за последние дни)
+    const realtimeSalesByDay = aggregateSalesByDay(salesData);
+    
+    // Находим последнюю дату в детализированном отчете
+    const lastDetailedDate = detailedSalesByDay.length > 0 
+      ? detailedSalesByDay[detailedSalesByDay.length - 1].date 
+      : '2000-01-01';
+    
+    console.log(`📊 Последняя дата в детализированном отчете: ${lastDetailedDate}`);
+    console.log(`📊 Выкупов из детализированного отчета: ${detailedSalesByDay.length} дней`);
+    console.log(`📊 Выкупов из старого API: ${realtimeSalesByDay.length} дней`);
+    
+    // Объединяем: берем данные из детализированного отчета + добавляем более новые из старого API
+    const salesByDayMap = new Map<string, { date: string; revenue: number; orders: number; fbsBuyouts?: number; fbwBuyouts?: number; fbsRevenue?: number; fbwRevenue?: number }>();
+    
+    // Сначала добавляем данные из детализированного отчета (они более точные)
+    detailedSalesByDay.forEach(day => {
+      salesByDayMap.set(day.date, day);
+    });
+    
+    // Затем добавляем/обновляем данные из старого API для дней ПОСЛЕ последней даты детализированного отчета
+    realtimeSalesByDay.forEach(day => {
+      if (day.date > lastDetailedDate) {
+        // Для новых дней берем данные из старого API
+        salesByDayMap.set(day.date, {
+          ...day,
+          fbsBuyouts: 0,
+          fbwBuyouts: day.orders, // Предполагаем FBW по умолчанию
+          fbsRevenue: 0,
+          fbwRevenue: day.revenue
+        });
+        console.log(`📊 Добавлен день ${day.date} из старого API: ${day.orders} выкупов, ${day.revenue}₽`);
+      }
+    });
+    
+    salesByDay = Array.from(salesByDayMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`📊 Итого после объединения: ${salesByDay.length} дней`);
+  } else {
+    // Используем только старый API
+    salesByDay = aggregateSalesByDay(salesData);
+  }
+  
+  const dataForChart = useDetailedReport ? detailedReport! : salesData;
+  
+  // Агрегация ЗАКАЗОВ по дням (из /api/v1/supplier/orders)
+  // Это реальные заказы клиентов, не выкупы!
+  const ordersByDay = aggregateOrdersByDay(ordersData);
+  
+  // Объединяем данные выкупов и заказов по датам
+  const salesByDayWithOrders = salesByDay.map(day => {
+    const ordersForDay = ordersByDay.find(o => o.date === day.date);
+    return {
+      ...day,
+      orderCount: ordersForDay?.orderCount || 0,
+      orderSum: ordersForDay?.orderSum || 0
+    };
+  });
+  
+  // Добавляем дни с заказами, которых нет в выкупах
+  ordersByDay.forEach(orderDay => {
+    if (!salesByDayWithOrders.find(s => s.date === orderDay.date)) {
+      salesByDayWithOrders.push({
+        date: orderDay.date,
+        revenue: 0,
+        orders: 0,
+        orderCount: orderDay.orderCount,
+        orderSum: orderDay.orderSum
+      });
+    }
+  });
+  
+  // Сортируем по дате
+  salesByDayWithOrders.sort((a, b) => a.date.localeCompare(b.date));
+  
+  console.log(`📊 salesByDay (выкупы): ${salesByDay.length} дней, первый: ${salesByDay[0]?.date}, последний: ${salesByDay[salesByDay.length-1]?.date}`);
+  console.log(`📊 ordersByDay (заказы): ${ordersByDay.length} дней`);
   console.log(`📊 Источник данных для графика: ${useDetailedReport ? 'detailedReport' : 'salesData'}, записей: ${dataForChart.length}`);
   
   if (salesByDay.length === 0 && dataForChart.length > 0) {
@@ -1174,25 +1596,136 @@ async function buildAnalyticsDashboard(
     console.warn('⚠️ График пустой - нет данных о продажах за выбранный период');
   }
   
-  // Топ товары по выручке
-  const productRevenue = new Map<number, { revenue: number; orders: number; title: string }>();
+  // Топ товары по выручке с данными по периодам
+  interface ProductStats {
+    revenue: number;
+    orders: number;
+    orderCount: number;
+    orderSum: number;
+    title: string;
+    // Данные за неделю
+    weekRevenue: number;
+    weekOrders: number;
+    weekOrderCount: number;
+    weekOrderSum: number;
+    // Данные за месяц
+    monthRevenue: number;
+    monthOrders: number;
+    monthOrderCount: number;
+    monthOrderSum: number;
+  }
+  
+  const productRevenue = new Map<number, ProductStats>();
+  
+  // Даты для фильтрации по периодам
+  const periodNow = new Date();
+  const periodToday = new Date(periodNow.getFullYear(), periodNow.getMonth(), periodNow.getDate());
+  const periodWeekAgo = new Date(periodToday.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const periodMonthAgo = new Date(periodToday.getTime() - 30 * 24 * 60 * 60 * 1000);
+  
+  // Сначала собираем данные о ЗАКАЗАХ по товарам (из ordersData) с разбивкой по периодам
+  const productOrders = new Map<number, { 
+    orderCount: number; orderSum: number;
+    weekOrderCount: number; weekOrderSum: number;
+    monthOrderCount: number; monthOrderSum: number;
+  }>();
+  
+  (ordersData || []).forEach((order: any) => {
+    if (order.isCancel) return; // Пропускаем отмененные
+    const nmId = order.nmId;
+    if (!nmId) return;
+    
+    const orderDate = new Date(order.date || order.createdAt || order.orderDate);
+    const isWeek = orderDate >= periodWeekAgo;
+    const isMonth = orderDate >= periodMonthAgo;
+    const price = order.finishedPrice || order.priceWithDisc || order.totalPrice || 0;
+    
+    const current = productOrders.get(nmId) || { 
+      orderCount: 0, orderSum: 0,
+      weekOrderCount: 0, weekOrderSum: 0,
+      monthOrderCount: 0, monthOrderSum: 0
+    };
+    
+    // Общие данные (за весь период)
+    current.orderCount += 1;
+    current.orderSum += price;
+    
+    // За неделю
+    if (isWeek) {
+      current.weekOrderCount += 1;
+      current.weekOrderSum += price;
+    }
+    
+    // За месяц
+    if (isMonth) {
+      current.monthOrderCount += 1;
+      current.monthOrderSum += price;
+    }
+    
+    productOrders.set(nmId, current);
+  });
+  console.log(`📦 Собрано заказов по ${productOrders.size} товарам (с разбивкой по периодам)`);
   
   console.log(`📦 Формирование товаров: useDetailedReport=${useDetailedReport}, salesData=${salesData?.length || 0}, detailedReport=${detailedReport?.length || 0}`);
   
+  // Функция для создания пустой статистики товара
+  const createEmptyStats = (orderData: any): ProductStats => ({
+    revenue: 0, orders: 0,
+    orderCount: orderData.orderCount || 0, orderSum: orderData.orderSum || 0,
+    title: '',
+    weekRevenue: 0, weekOrders: 0,
+    weekOrderCount: orderData.weekOrderCount || 0, weekOrderSum: orderData.weekOrderSum || 0,
+    monthRevenue: 0, monthOrders: 0,
+    monthOrderCount: orderData.monthOrderCount || 0, monthOrderSum: orderData.monthOrderSum || 0
+  });
+
   if (useDetailedReport) {
-    // ✅ Из детализированного отчета: учитываем ВСЕ типы документов
-    const allItems = detailedReport!.filter((item: any) => item.quantity > 0);
-    console.log(`📦 Отфильтровано товаров из detailedReport: ${allItems.length}`);
-    allItems.forEach((item: any) => {
+    // ✅ Из детализированного отчета: учитываем ВСЕ типы документов с разбивкой по периодам
+    // Фильтруем только продажи (не логистику, хранение и т.д.)
+    const salesItems = detailedReport!.filter((item: any) => {
+      const docType = (item.docTypeName || '').toLowerCase();
+      return docType.includes('продажа') || docType.includes('возврат') || 
+             docType.includes('реализация') || docType.includes('выкуп');
+    });
+    console.log(`📦 Отфильтровано продаж из detailedReport: ${salesItems.length}`);
+    
+    salesItems.forEach((item: any) => {
       const nmId = item.nmId;
-      const current = productRevenue.get(nmId) || { revenue: 0, orders: 0, title: '' }; // Пустое название - заполним из БД
+      const orderData = productOrders.get(nmId) || { 
+        orderCount: 0, orderSum: 0,
+        weekOrderCount: 0, weekOrderSum: 0,
+        monthOrderCount: 0, monthOrderSum: 0
+      };
+      const current = productRevenue.get(nmId) || createEmptyStats(orderData);
       
-      // Для возвратов и отмен вычитаем выручку
-      const multiplier = (item.docTypeName?.includes('возврат') || item.docTypeName?.includes('Возврат') || 
-                         item.docTypeName?.includes('отмен') || item.docTypeName?.includes('Отмен')) ? -1 : 1;
+      // Определяем дату продажи
+      const saleDate = new Date(item.saleDt || item.sale_dt || item.orderDt);
+      const isWeek = saleDate >= periodWeekAgo;
+      const isMonth = saleDate >= periodMonthAgo;
       
-      current.revenue += (item.retailPriceWithDisc || item.retailPrice || 0) * multiplier;
-      current.orders += item.quantity * multiplier;
+      // Для возвратов вычитаем
+      const docType = (item.docTypeName || '').toLowerCase();
+      const isReturn = docType.includes('возврат');
+      const multiplier = isReturn ? -1 : 1;
+      
+      const revenue = (item.retailPriceWithDisc || item.retailPrice || 0) * multiplier;
+      const qty = (item.quantity || 1) * multiplier;
+      
+      // Общие данные
+      current.revenue += revenue;
+      current.orders += qty;
+      
+      // За неделю
+      if (isWeek) {
+        current.weekRevenue += revenue;
+        current.weekOrders += qty;
+      }
+      
+      // За месяц
+      if (isMonth) {
+        current.monthRevenue += revenue;
+        current.monthOrders += qty;
+      }
       
       // Используем subject из WB если есть
       if (item.subject && !current.title) {
@@ -1205,9 +1738,30 @@ async function buildAnalyticsDashboard(
     // Из старого API
     salesData.forEach((sale: any) => {
       const nmId = sale.nmId;
-      const current = productRevenue.get(nmId) || { revenue: 0, orders: 0, title: '' }; // Пустое название - заполним из БД
-      current.revenue += sale.finishedPrice || 0;
+      const orderData = productOrders.get(nmId) || { 
+        orderCount: 0, orderSum: 0,
+        weekOrderCount: 0, weekOrderSum: 0,
+        monthOrderCount: 0, monthOrderSum: 0
+      };
+      const current = productRevenue.get(nmId) || createEmptyStats(orderData);
+      
+      const saleDate = new Date(sale.date);
+      const isWeek = saleDate >= periodWeekAgo;
+      const isMonth = saleDate >= periodMonthAgo;
+      const price = sale.finishedPrice || 0;
+      
+      current.revenue += price;
       current.orders += 1;
+      
+      if (isWeek) {
+        current.weekRevenue += price;
+        current.weekOrders += 1;
+      }
+      
+      if (isMonth) {
+        current.monthRevenue += price;
+        current.monthOrders += 1;
+      }
       
       // Используем subject из WB если есть
       if (sale.subject && !current.title) {
@@ -1217,6 +1771,39 @@ async function buildAnalyticsDashboard(
       productRevenue.set(nmId, current);
     });
   }
+
+  // ✅ ДОБАВЛЯЕМ ТОВАРЫ ИЗ ЗАКАЗОВ, которых нет в выкупах
+  // Это важно для отображения товаров с заказами, но без выкупов
+  productOrders.forEach((orderData, nmId) => {
+    if (!productRevenue.has(nmId)) {
+      productRevenue.set(nmId, createEmptyStats(orderData));
+    }
+  });
+  console.log(`📦 После добавления заказов: ${productRevenue.size} товаров в productRevenue`);
+
+  // ✅ СОЗДАЕМ MAP С ФОТО ИЗ КАРТОЧЕК WB API (productsData)
+  const wbCardsPhotoMap = new Map<number, string>();
+  (productsData || []).forEach((card: any) => {
+    const nmId = card.nmID;
+    if (!nmId) return;
+    
+    // Извлекаем фото из карточки WB
+    // Структура: card.photos[0].big или card.mediaFiles[0]
+    let photoUrl: string | null = null;
+    
+    if (card.photos && Array.isArray(card.photos) && card.photos.length > 0) {
+      // Формат: photos[].big или photos[].c516x688
+      const photo = card.photos[0];
+      photoUrl = photo.big || photo.c516x688 || photo.tm || null;
+    } else if (card.mediaFiles && Array.isArray(card.mediaFiles) && card.mediaFiles.length > 0) {
+      photoUrl = card.mediaFiles[0];
+    }
+    
+    if (photoUrl) {
+      wbCardsPhotoMap.set(nmId, photoUrl);
+    }
+  });
+  console.log(`📷 Загружено фото из карточек WB: ${wbCardsPhotoMap.size} товаров`);
 
   // ✅ ОБОГАЩАЕМ ДАННЫЕ: Получаем названия товаров из БД
   console.log(`📦 Загружаем названия для ${productRevenue.size} товаров из БД...`);
@@ -1255,6 +1842,10 @@ async function buildAnalyticsDashboard(
       if (wbData.photos && Array.isArray(wbData.photos) && wbData.photos.length > 0) {
         imageUrl = wbData.photos[0];
       }
+    }
+    // 3. Из карточек WB API (если нет в БД)
+    if (!imageUrl && wbCardsPhotoMap.has(nmId)) {
+      imageUrl = wbCardsPhotoMap.get(nmId) || null;
     }
     
     productTitlesMap.set(nmId, { 
@@ -1299,34 +1890,92 @@ async function buildAnalyticsDashboard(
     .slice(0, 10)
     .map(([nmID, data]) => {
       const dbData = productTitlesMap.get(nmID);
+      const wbCardPhoto = wbCardsPhotoMap.get(nmID);
       const wbImageUrl = generateWBImageUrl(nmID);
+      
+      // Приоритет: 1. БД (originalImage/wbData), 2. Карточка WB API, 3. CDN WB
+      const imageUrl = dbData?.image || wbCardPhoto || wbImageUrl;
       
       return {
         nmID,
         title: data.title || dbData?.name || `Товар ${nmID}`,
         revenue: Math.round(data.revenue),
         orders: data.orders,
-        image: dbData?.image || wbImageUrl // Приоритет: изображение из БД, затем WB
+        image: imageUrl
       };
     });
 
-  // ✅ ВСЕ товары (для поиска)
-  const allProducts = Array.from(productRevenue.entries())
-    .sort((a, b) => b[1].revenue - a[1].revenue)
+  // ✅ ВСЕ товары (для поиска) с данными о заказах ПО ПЕРИОДАМ
+  // Сначала добавляем товары с продажами
+  const allProductsWithSales = Array.from(productRevenue.entries())
     .map(([nmID, data]) => {
       const dbData = productTitlesMap.get(nmID);
+      const wbCardPhoto = wbCardsPhotoMap.get(nmID);
       const wbImageUrl = generateWBImageUrl(nmID);
+      
+      // Приоритет: 1. БД (originalImage/wbData), 2. Карточка WB API, 3. CDN WB
+      const imageUrl = dbData?.image || wbCardPhoto || wbImageUrl;
       
       return {
         nmID,
         title: data.title || dbData?.name || `Товар ${nmID}`,
         revenue: Math.round(data.revenue),
-        orders: data.orders,
-        image: dbData?.image || wbImageUrl // Приоритет: изображение из БД, затем WB
+        orders: data.orders,           // Количество выкупов (всего)
+        orderCount: data.orderCount,   // Количество заказов (всего)
+        orderSum: data.orderSum,       // Сумма заказов (всего)
+        // Данные за неделю
+        weekRevenue: Math.round(data.weekRevenue),
+        weekOrders: data.weekOrders,
+        weekOrderCount: data.weekOrderCount,
+        weekOrderSum: Math.round(data.weekOrderSum),
+        // Данные за месяц
+        monthRevenue: Math.round(data.monthRevenue),
+        monthOrders: data.monthOrders,
+        monthOrderCount: data.monthOrderCount,
+        monthOrderSum: Math.round(data.monthOrderSum),
+        image: imageUrl
       };
     });
 
-  console.log(`✅ topProducts: ${topProducts.length}, allProducts: ${allProducts.length}`);
+  // ✅ ДОБАВЛЯЕМ товары БЕЗ продаж (из productsData и БД)
+  const productNmIdsWithSales = new Set(productRevenue.keys());
+  
+  // Товары из WB API без продаж
+  const productsWithoutSalesFromWB = (productsData || [])
+    .filter((card: any) => !productNmIdsWithSales.has(card.nmID))
+    .map((card: any) => {
+      const nmID = card.nmID;
+      const dbData = productTitlesMap.get(nmID);
+      const wbCardPhoto = wbCardsPhotoMap.get(nmID);
+      const wbImageUrl = generateWBImageUrl(nmID);
+      const imageUrl = dbData?.image || wbCardPhoto || wbImageUrl;
+      
+      return {
+        nmID,
+        title: card.title || dbData?.name || `Товар ${nmID}`,
+        revenue: 0,
+        orders: 0,
+        orderCount: 0,
+        orderSum: 0,
+        weekRevenue: 0,
+        weekOrders: 0,
+        weekOrderCount: 0,
+        weekOrderSum: 0,
+        monthRevenue: 0,
+        monthOrders: 0,
+        monthOrderCount: 0,
+        monthOrderSum: 0,
+        image: imageUrl
+      };
+    });
+  
+  // Объединяем: сначала товары с продажами (отсортированные по выручке), потом без продаж
+  const allProducts = [
+    ...allProductsWithSales.sort((a, b) => b.revenue - a.revenue),
+    ...productsWithoutSalesFromWB
+  ];
+
+  console.log(`✅ topProducts: ${topProducts.length}, allProducts: ${allProducts.length} (с продажами: ${allProductsWithSales.length}, без продаж: ${productsWithoutSalesFromWB.length})`);
   console.log(`📊 Товары для отправки (первые 3):`, topProducts.slice(0, 3).map(p => ({
     nmID: p.nmID,
     title: p.title,
@@ -1336,11 +1985,42 @@ async function buildAnalyticsDashboard(
   console.log(`📊 ПЕРЕД ВОЗВРАТОМ: salesByDay.length=${salesByDay.length}, первый день: ${salesByDay[0]?.date}`);
 
   // РЕАЛЬНЫЕ остатки из WB API с детализацией по FBW/FBS
-  const totalStock = stocksData.reduce((sum, stock) => sum + (stock.quantity || 0), 0);
+  // ⚠️ НЕ суммируем напрямую stock.quantity - там дубликаты!
+  // Используем уникальные остатки по товарам из /api/wb/stocks
   const inWayToClient = stocksData.reduce((sum, stock) => sum + (stock.inWayToClient || 0), 0);
   const inWayFromClient = stocksData.reduce((sum, stock) => sum + (stock.inWayFromClient || 0), 0);
   const reserved = stocksData.reduce((sum, stock) => sum + (stock.quantityFull || 0) - (stock.quantity || 0), 0);
   const lowStockProducts = stocksData.filter(s => (s.quantity || 0) < 5).length;
+  
+  // Список товаров для пополнения (< 5 шт)
+  const lowStockProductsList = stocksData
+    .filter(s => (s.quantity || 0) < 5 && s.nmId) // Фильтруем товары без nmId
+    .reduce((acc: Map<number, { nmId: number; quantity: number; warehouseName: string; title: string }>, stock) => {
+      const nmId = stock.nmId;
+      if (!nmId) return acc; // Пропускаем если нет nmId
+      
+      const existing = acc.get(nmId);
+      if (existing) {
+        existing.quantity += stock.quantity || 0;
+      } else {
+        // Получаем название из productTitlesMap или productsData
+        const dbData = productTitlesMap?.get(nmId);
+        const wbCard = (productsData || []).find((c: any) => c.nmID === nmId);
+        const title = dbData?.name || wbCard?.title || stock.subject || stock.supplierArticle || `Артикул ${nmId}`;
+        
+        acc.set(nmId, {
+          nmId,
+          quantity: stock.quantity || 0,
+          warehouseName: stock.warehouseName || 'Неизвестно',
+          title
+        });
+      }
+      return acc;
+    }, new Map());
+  
+  // ✅ FBS остатки уже загружены из WB API в getWBStocks()
+  // Больше не нужно дополнять из БД - все данные приходят напрямую с WB
+  console.log('📦 Все остатки (FBW + FBS) загружены из WB API');
   
   // Группировка остатков по складам (FBW vs FBS)
   const stocksByWarehouse = new Map<string, { quantity: number; inWayToClient: number; inWayFromClient: number }>();
@@ -1353,41 +2033,267 @@ async function buildAnalyticsDashboard(
     stocksByWarehouse.set(warehouse, current);
   });
   
-  // Определяем FBW и FBS остатки (FBW - склады WB, FBS - склады продавца)
+  // Определяем FBW и FBS остатки используя данные из /api/wb/stocks
   let fbwStock = 0;
   let fbsStock = 0;
   
-  console.log('🏭 Анализ складов для определения FBW/FBS:');
-  stocksByWarehouse.forEach((data, warehouse) => {
-    // Склады WB обычно содержат "Коледино", "Подольск", "Электросталь" и т.д.
-    // Также проверяем на наличие "WB" в названии
-    const isFBW = warehouse.includes('Коледино') || warehouse.includes('Подольск') || 
-                  warehouse.includes('Электросталь') || warehouse.includes('Казань') ||
-                  warehouse.includes('Екатеринбург') || warehouse.includes('Новосибирск') ||
-                  warehouse.includes('Санкт-Петербург') || warehouse.includes('Краснодар') ||
-                  warehouse.toLowerCase().includes('wb') || warehouse.toLowerCase().includes('wildberries');
+  console.log('🏭 Анализ остатков по типам складов (из /api/wb/stocks):');
+  
+  // Подсчитываем остатки с учетом товаров в пути
+  let fbwOnWarehouse = 0;
+  let fbwInWayToClient = 0;
+  let fbwInWayFromClient = 0;
+  
+  stocksData.forEach(stock => {
+    const inWayToClient = stock.inWayToClient || 0;
+    const inWayFromClient = stock.inWayFromClient || 0;
     
-    if (isFBW) {
-      fbwStock += data.quantity;
-      console.log(`  ✅ FBW склад "${warehouse}": ${data.quantity} шт (в пути к клиенту: ${data.inWayToClient}, от клиента: ${data.inWayFromClient})`);
+    // Используем fbsStock и fbwStock из /api/wb/stocks
+    const stockFBS = stock.fbsStock || 0;
+    const stockFBW = stock.fbwStock || 0;
+    
+    fbsStock += stockFBS;
+    fbwOnWarehouse += stockFBW;
+    fbwInWayToClient += inWayToClient;
+    fbwInWayFromClient += inWayFromClient;
+  });
+  
+  // FBW = на складе + в пути к клиенту + возвраты (как на странице товаров)
+  fbwStock = fbwOnWarehouse + fbwInWayToClient + fbwInWayFromClient;
+  
+  console.log(`  ✅ FBW (склады WB): ${fbwStock} шт (на складе: ${fbwOnWarehouse}, к клиенту: ${fbwInWayToClient}, возвраты: ${fbwInWayFromClient})`);
+  console.log(`  📦 FBS (склады продавца): ${fbsStock} шт`);
+  
+  // ✅ ПРАВИЛЬНЫЙ расчет totalStock: FBS (на складе продавца) + FBW (только на складе WB, БЕЗ товаров в пути)
+  // Товары в пути не считаются как "на складе", они учитываются отдельно в inWayToClient
+  const totalStock = fbsStock + fbwOnWarehouse;
+  console.log(`  📊 ИТОГО на складе: ${totalStock} шт (FBS: ${fbsStock} + FBW на складе: ${fbwOnWarehouse})`);
+  
+  // Детализация по складам для отладки
+  console.log('🏭 Детализация по складам:');
+  stocksByWarehouse.forEach((data, warehouse) => {
+    // Находим warehouseType для этого склада
+    const stockForWarehouse = stocksData.find(s => s.warehouseName === warehouse);
+    const warehouseType = stockForWarehouse?.warehouseType || 'FBW';
+    
+    if (warehouseType === 'FBS') {
+      console.log(`  📦 FBS склад "${warehouse}": ${data.quantity} шт`);
     } else {
-      fbsStock += data.quantity;
-      console.log(`  📦 FBS склад "${warehouse}": ${data.quantity} шт (в пути к клиенту: ${data.inWayToClient}, от клиента: ${data.inWayFromClient})`);
+      console.log(`  ✅ FBW склад "${warehouse}": ${data.quantity} шт`);
     }
   });
   
-  // Реальная стоимость остатков на основе цен из продаж
+  // Реальная стоимость остатков на основе цен из БД и продаж
   const priceMap = new Map<number, number>();
+  
+  // 1. Сначала берем цены из БД (productMap) - ПРИОРИТЕТ: discountPrice (цена со скидкой)
+  productMap.forEach((product, nmIdStr) => {
+    const nmId = parseInt(nmIdStr);
+    // ВАЖНО: Используем discountPrice (цена со скидкой), если нет - fallback на price
+    const priceToUse = product.discountPrice || product.price;
+    if (priceToUse && priceToUse > 0) {
+      priceMap.set(nmId, priceToUse);
+    }
+  });
+  
+  // 2. Дополняем ценами из продаж (если нет в БД)
   salesData.forEach(sale => {
-    if (sale.nmId && sale.finishedPrice) {
+    if (sale.nmId && sale.finishedPrice && !priceMap.has(sale.nmId)) {
       priceMap.set(sale.nmId, sale.finishedPrice);
     }
   });
   
-  const stockValue = stocksData.reduce((sum, stock) => {
-    const price = priceMap.get(stock.nmId) || 1000; // Используем реальную цену или среднюю
-    return sum + (stock.quantity || 0) * price;
-  }, 0);
+  // 3. Также берем цены из детализированного отчета
+  if (useDetailedReport && detailedReport) {
+    detailedReport.forEach((item: any) => {
+      if (item.nmId && item.retailPriceWithDisc && !priceMap.has(item.nmId)) {
+        priceMap.set(item.nmId, item.retailPriceWithDisc);
+      }
+    });
+  }
+  
+  // 4. Берем цены из stocksData (Price поле)
+  stocksData.forEach(stock => {
+    if (stock.nmId && stock.Price && stock.Price > 0 && !priceMap.has(stock.nmId)) {
+      priceMap.set(stock.nmId, stock.Price);
+    }
+  });
+  
+  // 5. Берем цены из productsData (карточки товаров WB API)
+  // Структура: card.sizes[].price или card.sizes[].discountedPrice
+  let pricesFromCards = 0;
+  (productsData || []).forEach((card: any) => {
+    const nmId = card.nmID;
+    if (!nmId) return;
+    
+    // Ищем цену в sizes
+    if (card.sizes && Array.isArray(card.sizes) && card.sizes.length > 0) {
+      const size = card.sizes[0];
+      // ВАЖНО: discountedPrice - цена со скидкой (приоритет!)
+      // WB API возвращает цены в копейках (например 399900 = 3999₽)
+      let price = size.discountedPrice || size.price || 0;
+      
+      // Если цена > 100000, скорее всего это копейки
+      if (price > 100000) {
+        price = price / 100;
+      }
+      
+      // Перезаписываем цену из БД, если нашли discountedPrice в WB API
+      if (price > 0 && size.discountedPrice) {
+        priceMap.set(nmId, price);
+        pricesFromCards++;
+      } else if (price > 0 && !priceMap.has(nmId)) {
+        // Используем базовую цену только если нет другой
+        priceMap.set(nmId, price);
+        pricesFromCards++;
+      }
+    }
+  });
+  
+  console.log(`💰 Карта цен: ${priceMap.size} товаров (из карточек WB: ${pricesFromCards})`);
+  
+  // 6. ✅ НОВОЕ: Получаем цены из WB API для товаров без цены в БД
+  const nmIdsWithoutPrice: number[] = [];
+  stocksData.forEach(stock => {
+    if (stock.nmId && !priceMap.has(stock.nmId)) {
+      nmIdsWithoutPrice.push(stock.nmId);
+    }
+  });
+  
+  if (nmIdsWithoutPrice.length > 0 && apiToken) {
+    console.log(`🔄 Загрузка цен из WB API для ${nmIdsWithoutPrice.length} товаров без цены...`);
+    try {
+      const { wbApiService } = await import('@/lib/services/wbApiService');
+      const wbPrices = await wbApiService.getBatchPrices(apiToken, nmIdsWithoutPrice);
+      
+      console.log(`✅ Получено ${wbPrices.size} цен из WB API`);
+      
+      // Сохраняем цены в БД и добавляем в priceMap
+      const pricesUpdated: number[] = [];
+      for (const [nmId, price] of wbPrices.entries()) {
+        if (price > 0) {
+          priceMap.set(nmId, price);
+          
+          // Сохраняем в БД
+          try {
+            await prisma.product.updateMany({
+              where: { 
+                wbNmId: String(nmId),
+                userId: user.id
+              },
+              data: { 
+                discountPrice: price,
+                price: price // Также обновляем базовую цену
+              }
+            });
+            pricesUpdated.push(nmId);
+          } catch (dbError) {
+            console.error(`⚠️ Ошибка сохранения цены для товара ${nmId}:`, dbError);
+          }
+        }
+      }
+      
+      if (pricesUpdated.length > 0) {
+        console.log(`✅ Обновлено цен в БД: ${pricesUpdated.length} товаров`);
+        console.log(`   Примеры: ${pricesUpdated.slice(0, 3).map(id => `${id}: ${priceMap.get(id)}₽`).join(', ')}`);
+      }
+    } catch (error) {
+      console.error(`❌ Ошибка загрузки цен из WB API:`, error);
+    }
+  }
+  
+  // Логируем первые 5 цен для отладки с источником
+  let priceLogCount = 0;
+  priceMap.forEach((price, nmId) => {
+    if (priceLogCount < 5) {
+      const product = productMap.get(String(nmId));
+      const source = product?.discountPrice ? 'discountPrice (БД)' : product?.price ? 'price (БД)' : 'WB API';
+      console.log(`  💵 Товар ${nmId}: ${price}₽ (источник: ${source})`);
+      priceLogCount++;
+    }
+  });
+  
+  // ✅ ИСПРАВЛЕНИЕ: Сначала агрегируем количество по nmId (суммируем остатки со всех складов)
+  const stocksByNmId = new Map<number, { 
+    totalQuantity: number; 
+    onWarehouse: number;
+    inWayToClient: number; 
+    inWayFromClient: number;
+  }>();
+  
+  stocksData.forEach(stock => {
+    if (!stock.nmId) return;
+    
+    const existing = stocksByNmId.get(stock.nmId) || { 
+      totalQuantity: 0, 
+      onWarehouse: 0,
+      inWayToClient: 0, 
+      inWayFromClient: 0 
+    };
+    
+    existing.onWarehouse += stock.quantity || 0;
+    existing.inWayToClient += stock.inWayToClient || 0;
+    existing.inWayFromClient += stock.inWayFromClient || 0;
+    existing.totalQuantity = existing.onWarehouse + existing.inWayToClient + existing.inWayFromClient;
+    
+    stocksByNmId.set(stock.nmId, existing);
+  });
+  
+  console.log(`📦 Агрегировано остатков по ${stocksByNmId.size} товарам`);
+  
+  // Теперь рассчитываем стоимость по агрегированным данным
+  let stockValueCalculated = 0;
+  let stocksWithPrice = 0;
+  let stocksWithoutPrice = 0;
+  
+  stocksByNmId.forEach((stockData, nmId) => {
+    // Приоритет: 1. priceMap, 2. из stocksData
+    let price: number = priceMap.get(nmId) || 0;
+    
+    if (price <= 0) {
+      // Ищем цену в исходных данных stocksData
+      const stockWithPrice = stocksData.find(s => s.nmId === nmId && (s.Price || s.price));
+      if (stockWithPrice) {
+        price = stockWithPrice.Price || stockWithPrice.price || 0;
+        // Если цена > 100000, скорее всего это копейки
+        if (price > 100000) {
+          price = price / 100;
+        }
+      }
+    }
+    
+    if (price && price > 0) {
+      const itemValue = stockData.totalQuantity * price;
+      stockValueCalculated += itemValue;
+      stocksWithPrice++;
+      // Логируем первые 10 товаров для отладки
+      if (stocksWithPrice <= 10) {
+        const product = productMap.get(String(nmId));
+        const priceSource = product?.discountPrice ? `discountPrice=${product.discountPrice}₽` : 
+                           product?.price ? `price=${product.price}₽` : 
+                           'WB API';
+        console.log(`  💵 [${nmId}] ${stockData.totalQuantity} шт × ${price}₽ = ${itemValue.toLocaleString('ru-RU')}₽ (${priceSource})`);
+        console.log(`      └─ На складе: ${stockData.onWarehouse}, К клиенту: ${stockData.inWayToClient}, Возвраты: ${stockData.inWayFromClient}`);
+      }
+    } else {
+      stocksWithoutPrice++;
+      // Логируем ВСЕ товары без цены для отладки
+      const product = productMap.get(String(nmId));
+      const productName = product?.name || `Товар ${nmId}`;
+      console.log(`  ⚠️ [${nmId}] "${productName}" БЕЗ ЦЕНЫ, количество: ${stockData.totalQuantity} шт`);
+      console.log(`      └─ На складе: ${stockData.onWarehouse}, К клиенту: ${stockData.inWayToClient}, Возвраты: ${stockData.inWayFromClient}`);
+    }
+  });
+  
+  const stockValue = stockValueCalculated;
+  console.log(`\n💰 ИТОГО стоимость остатков: ${Math.round(stockValue).toLocaleString('ru-RU')}₽`);
+  console.log(`   ✅ Товаров с ценой: ${stocksWithPrice}`);
+  console.log(`   ⚠️ Товаров БЕЗ цены: ${stocksWithoutPrice}`);
+  
+  if (stocksWithoutPrice > 0) {
+    console.log(`\n⚠️ ВНИМАНИЕ: ${stocksWithoutPrice} товаров не учтены в стоимости остатков!`);
+    console.log(`   Укажите цены (discountPrice) для этих товаров в базе данных.`);
+  }
   
   console.log('📦 Остатки:', {
     всегоНаСкладе: totalStock,
@@ -1458,12 +2364,132 @@ async function buildAnalyticsDashboard(
     console.warn('⚠️ Ошибка при запросе конверсии:', conversionError);
   }
 
-  // Топ поисковые запросы (извлекаем из названий товаров)
-  const searchQueries = extractSearchQueries(salesData);
+  // Топ поисковые запросы из синхронизированных данных ProductAnalytics
+  let searchQueries: Array<{ query: string; frequency: number; orders: number; revenue: number }> = [];
+  try {
+    // Получаем поисковые запросы из таблицы ProductAnalytics
+    const allAnalytics = await prismaAnalytics.productAnalytics.findMany({
+      where: {
+        product: {
+          userId: user.id
+        }
+      },
+      select: {
+        topSearchQueries: true,
+        revenue: true,
+        orders: true
+      }
+    });
+    
+    // Фильтруем только те, у которых есть поисковые запросы
+    const analyticsWithQueries = allAnalytics.filter(a => 
+      a.topSearchQueries && 
+      Array.isArray(a.topSearchQueries) && 
+      (a.topSearchQueries as any[]).length > 0
+    );
+    
+    // Агрегируем все поисковые запросы
+    const queryMap = new Map<string, { frequency: number; orders: number; revenue: number; addToCart: number }>();
+    
+    analyticsWithQueries.forEach(analytics => {
+      const queries = analytics.topSearchQueries as any[];
+      if (!queries || !Array.isArray(queries)) return;
+      
+      queries.forEach((q: any) => {
+        if (!q.query && !q.text) return;
+        const queryText = q.query || q.text || '';
+        if (!queryText) return;
+        
+        const existing = queryMap.get(queryText) || { frequency: 0, orders: 0, revenue: 0, addToCart: 0 };
+        existing.frequency += q.frequency || q.openCard || 1;
+        existing.orders += q.orders || 0;
+        existing.addToCart += q.addToCart || 0;
+        existing.revenue += (q.orders || 0) * (analytics.revenue / Math.max(analytics.orders, 1));
+        queryMap.set(queryText, existing);
+      });
+    });
+    
+    // Сортируем по количеству заказов и берем топ-10
+    searchQueries = Array.from(queryMap.entries())
+      .sort((a, b) => b[1].orders - a[1].orders)
+      .slice(0, 10)
+      .map(([query, data]) => ({
+        query,
+        frequency: data.frequency,
+        orders: data.orders,
+        revenue: Math.round(data.revenue)
+      }));
+    
+    console.log(`📊 Топ поисковых запросов: ${searchQueries.length} (из ${analyticsWithQueries.length} товаров с данными)`);
+  } catch (error) {
+    console.warn('⚠️ Ошибка получения поисковых запросов:', error);
+    searchQueries = [];
+  }
 
   // Производительность категорий
   const categoryPerformance = aggregateByCategory(salesData);
 
+  // ✅ ПОЛУЧАЕМ АКТУАЛЬНЫЕ ШТРАФЫ И УДЕРЖАНИЯ через WbPenaltiesService
+  let penalties = {
+    dimensionPenalty: 0,
+    dimensionPenaltyCount: 0,
+    deductions: 0,
+    deductionsCount: 0,
+    antifraud: 0,
+    antifraudCount: 0,
+    labelingPenalty: 0,
+    labelingPenaltyCount: 0,
+    paidAcceptance: 0,
+    paidAcceptanceCount: 0,
+    paidStorage: 0,
+    paidStorageCount: 0,
+    totalPenalties: 0,
+    totalPaidServices: 0,
+    grandTotal: 0
+  };
+
+  console.log('🔄 [buildAnalyticsDashboard] ШАГ 5: Получение актуальных штрафов и удержаний...');
+  try {
+    const penaltiesService = new WbPenaltiesService(apiToken);
+    const startDate = new Date(period.start);
+    const endDate = new Date(period.end);
+    
+    console.log('\n🔥 === ЗАПРОС АКТУАЛЬНЫХ ШТРАФОВ И УДЕРЖАНИЙ WB ===');
+    console.log(`📅 Период: ${startDate.toISOString().split('T')[0]} - ${endDate.toISOString().split('T')[0]}`);
+    
+    // Добавляем таймаут на случай зависания
+    const penaltiesPromise = penaltiesService.getAggregatedPenalties(startDate, endDate);
+    const timeoutPromise = new Promise<any>((resolve) => {
+      setTimeout(() => {
+        console.warn('⚠️ Таймаут получения штрафов (30с), продолжаем без них...');
+        resolve({
+          dimensionPenalty: 0,
+          dimensionPenaltyCount: 0,
+          deductions: 0,
+          deductionsCount: 0,
+          antifraud: 0,
+          antifraudCount: 0,
+          labelingPenalty: 0,
+          labelingPenaltyCount: 0,
+          paidAcceptance: 0,
+          paidAcceptanceCount: 0,
+          paidStorage: 0,
+          paidStorageCount: 0,
+          totalPenalties: 0,
+          totalPaidServices: 0,
+          grandTotal: 0
+        });
+      }, 30000); // 30 секунд таймаут
+    });
+    
+    penalties = await Promise.race([penaltiesPromise, timeoutPromise]);
+    console.log('✅ Получены актуальные штрафы и удержания от WB API');
+    console.log(`📊 Всего штрафов: ${penalties.grandTotal}₽\n`);
+  } catch (error) {
+    console.error('❌ Ошибка получения актуальных штрафов:', error);
+  }
+
+  console.log('🔄 [buildAnalyticsDashboard] ШАГ 6: Формирование итогового объекта...');
   // Период времени
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1474,7 +2500,8 @@ async function buildAnalyticsDashboard(
   const weekSales = salesData.filter(s => new Date(s.date) >= weekAgo).length;
   const monthSales = salesData.filter(s => new Date(s.date) >= monthAgo).length;
 
-  return {
+  console.log('🔄 [buildAnalyticsDashboard] ШАГ 7: Возврат результата...');
+  const result = {
     financial: {
       totalRevenue: Math.round(totalRevenue),
       totalOrders,
@@ -1495,11 +2522,31 @@ async function buildAnalyticsDashboard(
         returnsCount, // Количество возвратов
         totalStorage: Math.round(totalStorage),
         totalAcceptance: Math.round(totalAcceptance),
-        totalOtherDeductions: Math.round(totalOtherDeductions), // Штрафы, корректировки
+        totalPenalty: Math.round(totalPenalty), // Штрафы WB из детализированного отчета
+        totalDeduction: Math.round(totalDeduction), // 🔥 Корректировка ВВ
+        totalOtherDeductions: Math.round(totalOtherDeductions), // Прочие вычеты
         totalWbExpenses: Math.round(totalWbExpenses),
         totalCost: Math.round(totalCost),
         totalTaxes: Math.round(totalTaxes),
-        totalAdvertising: Math.round(totalAdvertising)
+        totalAdvertising: Math.round(totalAdvertising),
+        // ✅ АКТУАЛЬНЫЕ ШТРАФЫ И УДЕРЖАНИЯ (из специализированных API WB)
+        penalties: {
+          dimensionPenalty: Math.round(penalties.dimensionPenalty),
+          dimensionPenaltyCount: penalties.dimensionPenaltyCount,
+          deductions: Math.round(penalties.deductions),
+          deductionsCount: penalties.deductionsCount,
+          antifraud: Math.round(penalties.antifraud),
+          antifraudCount: penalties.antifraudCount,
+          labelingPenalty: Math.round(penalties.labelingPenalty),
+          labelingPenaltyCount: penalties.labelingPenaltyCount,
+          paidAcceptance: Math.round(penalties.paidAcceptance),
+          paidAcceptanceCount: penalties.paidAcceptanceCount,
+          paidStorage: Math.round(penalties.paidStorage),
+          paidStorageCount: penalties.paidStorageCount,
+          totalPenalties: Math.round(penalties.totalPenalties),
+          totalPaidServices: Math.round(penalties.totalPaidServices),
+          grandTotal: Math.round(penalties.grandTotal)
+        }
       },
       costInfo: {
         totalProducts: totalProductsInSales,
@@ -1516,29 +2563,37 @@ async function buildAnalyticsDashboard(
       monthSales,
       topProducts,
       allProducts,
-      salesByDay
+      salesByDay: salesByDayWithOrders
     },
     inventory: {
       totalProducts: productsData.length,
-      totalStock,
+      totalStock, // FBS + FBW на складе (БЕЗ товаров в пути)
       lowStockProducts,
-      inTransit: inWayToClient,
-      inReturn: inWayFromClient,
+      lowStockProductsList: Array.from(lowStockProductsList.values()).sort((a: any, b: any) => a.quantity - b.quantity) as Array<{ nmId: number; quantity: number; warehouseName: string; title: string }>,
+      inTransit: inWayToClient, // Товары в пути к клиенту
+      inReturn: inWayFromClient, // Товары в пути от клиента (возвраты)
       reserved,
       stockValue: Math.round(stockValue),
-      fbwStock,
-      fbsStock,
-      warehouseDetails: Array.from(stocksByWarehouse.entries()).map(([name, data]) => ({
-        name,
-        quantity: data.quantity,
-        inWayToClient: data.inWayToClient,
-        inWayFromClient: data.inWayFromClient,
-        isFBW: name.includes('Коледино') || name.includes('Подольск') || 
-               name.includes('Электросталь') || name.includes('Казань') ||
-               name.includes('Екатеринбург') || name.includes('Новосибирск') ||
-               name.includes('Белая Дача') || name.includes('Тула') ||
-               name.includes('Санкт-Петербург') || name.includes('Краснодар')
-      })).sort((a, b) => b.quantity - a.quantity)
+      // Детализация по типам складов (как на странице "Товары")
+      fbsStock, // FBS остатки (склады продавца)
+      fbwStock: fbwOnWarehouse, // FBW на складе WB (БЕЗ товаров в пути)
+      fbwTotal: fbwStock, // FBW всего (на складе + в пути + возвраты)
+      fbwInTransitToClient: fbwInWayToClient, // FBW товары в пути к клиенту
+      fbwInTransitFromClient: fbwInWayFromClient, // FBW товары в пути от клиента
+      // Детализация по складам
+      warehouseDetails: Array.from(stocksByWarehouse.entries()).map(([name, data]) => {
+        const stockForWarehouse = stocksData.find(s => s.warehouseName === name);
+        const warehouseType = stockForWarehouse?.warehouseType || 'FBW';
+        
+        return {
+          name,
+          type: warehouseType,
+          quantity: data.quantity,
+          inWayToClient: data.inWayToClient,
+          inWayFromClient: data.inWayFromClient,
+          total: data.quantity + data.inWayToClient + data.inWayFromClient
+        };
+      }).sort((a, b) => b.total - a.total)
     },
     conversion: {
       totalViews,
@@ -1552,35 +2607,76 @@ async function buildAnalyticsDashboard(
     period,
     generatedAt: new Date().toISOString()
   };
+  
+  console.log('✅ [buildAnalyticsDashboard] ЗАВЕРШЕНО УСПЕШНО');
+  return result;
 }
 
 /**
  * Агрегация продаж по дням из детализированного отчета
+ * ВАЖНО: 
+ * - revenue и orders - это ВЫКУПЫ (когда клиент забрал товар)
+ * - Детализированный отчет содержит только выкупы, не заказы
+ * - Для заказов нужно использовать воронку продаж (sales-funnel/products/history)
  */
-function aggregateSalesByDayFromDetailedReport(detailedReport: any[]): Array<{ date: string; revenue: number; orders: number }> {
-  const dailyData = new Map<string, { revenue: number; orders: number }>();
+function aggregateSalesByDayFromDetailedReport(detailedReport: any[]): Array<{ date: string; revenue: number; orders: number; fbsBuyouts: number; fbwBuyouts: number; fbsRevenue: number; fbwRevenue: number }> {
+  const dailyData = new Map<string, { revenue: number; orders: number; fbsBuyouts: number; fbwBuyouts: number; fbsRevenue: number; fbwRevenue: number }>();
   
-  console.log(`📊 Агрегация продаж по дням из ${detailedReport.length} записей детализированного отчета`);
+  // Фильтруем ТОЛЬКО записи о продажах/возвратах (не логистику, хранение и т.д.)
+  // docTypeName: "Продажа", "Возврат", "Корректировка продаж" - это продажи
+  // docTypeName: "Логистика", "Хранение", "Приёмка" - это НЕ продажи
+  const salesRecords = detailedReport.filter(item => {
+    const docType = (item.docTypeName || '').toLowerCase();
+    // Только продажи и возвраты товаров
+    return docType.includes('продажа') || docType.includes('возврат') || 
+           docType.includes('реализация') || docType.includes('выкуп');
+  });
   
-  detailedReport.forEach(item => {
-    // Используем saleDt (дата продажи) - основное поле в детализированном отчете WB
+  console.log(`📊 Агрегация ВЫКУПОВ: ${salesRecords.length} продаж из ${detailedReport.length} записей`);
+  
+  // Определяем FBS склады по названию (склады продавца обычно содержат "FBS" или имеют специфические названия)
+  const isFBSWarehouse = (warehouseName: string): boolean => {
+    const name = (warehouseName || '').toLowerCase();
+    // FBS склады обычно содержат "fbs" в названии или это склады продавца
+    // FBW склады - это склады WB (Коледино, Подольск, Электросталь и т.д.)
+    const fbwWarehouses = ['коледино', 'подольск', 'электросталь', 'казань', 'екатеринбург', 
+                          'новосибирск', 'белая дача', 'тула', 'санкт-петербург', 'краснодар',
+                          'хабаровск', 'пушкино', 'внуково', 'домодедово', 'шушары'];
+    return !fbwWarehouses.some(w => name.includes(w)) && name.length > 0;
+  };
+  
+  salesRecords.forEach(item => {
+    // Используем saleDt (дата продажи/выкупа) - основное поле в детализированном отчете WB
     const dateStr = item.saleDt || item.sale_dt || item.orderDt || item.order_dt;
     if (!dateStr) {
-      console.warn('⚠️ Запись без даты:', item);
       return;
     }
     
     const date = new Date(dateStr).toISOString().split('T')[0];
-    const current = dailyData.get(date) || { revenue: 0, orders: 0 };
+    const current = dailyData.get(date) || { revenue: 0, orders: 0, fbsBuyouts: 0, fbwBuyouts: 0, fbsRevenue: 0, fbwRevenue: 0 };
     
-    // Для возвратов и отмен вычитаем выручку
-    const isReturn = item.docTypeName?.includes('возврат') || item.docTypeName?.includes('Возврат') || 
-                     item.docTypeName?.includes('отмен') || item.docTypeName?.includes('Отмен');
+    // Для возвратов вычитаем
+    const docType = (item.docTypeName || '').toLowerCase();
+    const isReturn = docType.includes('возврат');
     const multiplier = isReturn ? -1 : 1;
     
+    // Выручка = цена × количество единиц
     const revenue = (item.retailPriceWithDisc || item.retailPrice || 0) * (item.quantity || 1);
+    const quantity = (item.quantity || 1) * multiplier;
+    
     current.revenue += revenue * multiplier;
-    current.orders += (item.quantity || 1) * multiplier;
+    current.orders += quantity;
+    
+    // Разбивка по FBS/FBW
+    const warehouseName = item.warehouseName || item.warehouse_name || '';
+    if (isFBSWarehouse(warehouseName)) {
+      current.fbsBuyouts += quantity;
+      current.fbsRevenue += revenue * multiplier;
+    } else {
+      current.fbwBuyouts += quantity;
+      current.fbwRevenue += revenue * multiplier;
+    }
+    
     dailyData.set(date, current);
   });
 
@@ -1588,12 +2684,18 @@ function aggregateSalesByDayFromDetailedReport(detailedReport: any[]): Array<{ d
     .map(([date, data]) => ({
       date,
       revenue: Math.round(data.revenue),
-      orders: data.orders
+      orders: data.orders,  // Это выкупы, не заказы!
+      fbsBuyouts: data.fbsBuyouts,
+      fbwBuyouts: data.fbwBuyouts,
+      fbsRevenue: Math.round(data.fbsRevenue),
+      fbwRevenue: Math.round(data.fbwRevenue)
     }))
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(-30); // Последние 30 дней
+    .sort((a, b) => a.date.localeCompare(b.date));
   
-  console.log(`✅ Агрегировано ${result.length} дней, первый: ${result[0]?.date}, последний: ${result[result.length-1]?.date}`);
+  const totalBuyouts = result.reduce((sum, d) => sum + d.orders, 0);
+  const totalFBS = result.reduce((sum, d) => sum + d.fbsBuyouts, 0);
+  const totalFBW = result.reduce((sum, d) => sum + d.fbwBuyouts, 0);
+  console.log(`✅ Агрегировано ${result.length} дней, всего ${totalBuyouts} выкупов (FBS: ${totalFBS}, FBW: ${totalFBW})`);
   
   return result;
 }
@@ -1618,53 +2720,119 @@ function aggregateSalesByDay(salesData: any[]): Array<{ date: string; revenue: n
       revenue: Math.round(data.revenue),
       orders: data.orders
     }))
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(-30); // Последние 30 дней
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Агрегация ЗАКАЗОВ по дням из /api/v1/supplier/orders
+ * ВАЖНО: Это реальные заказы (когда клиент оформил заказ), а не выкупы
+ * Исключаем отмененные заказы (isCancel = true)
+ */
+function aggregateOrdersByDay(ordersData: any[]): Array<{ date: string; orderCount: number; orderSum: number }> {
+  const dailyData = new Map<string, { orderCount: number; orderSum: number }>();
+  
+  console.log(`📊 Агрегация ЗАКАЗОВ по дням из ${ordersData.length} записей`);
+  
+  // Логируем сегодняшние заказы для отладки
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayOrders = ordersData.filter(o => {
+    const dateStr = o.date || o.lastChangeDate;
+    if (!dateStr) return false;
+    const orderDate = new Date(dateStr).toISOString().split('T')[0];
+    return orderDate === todayStr && !o.isCancel;
+  });
+  console.log(`📊 Сегодняшних заказов (${todayStr}): ${todayOrders.length} из ${ordersData.length}`);
+  if (todayOrders.length > 0) {
+    console.log(`📊 Первые 3 сегодняшних заказа:`, todayOrders.slice(0, 3).map(o => ({
+      date: o.date,
+      nmId: o.nmId,
+      finishedPrice: o.finishedPrice,
+      isCancel: o.isCancel
+    })));
+  }
+  
+  ordersData.forEach(order => {
+    // Пропускаем отмененные заказы
+    if (order.isCancel) return;
+    
+    const dateStr = order.date || order.lastChangeDate;
+    if (!dateStr) return;
+    
+    const date = new Date(dateStr).toISOString().split('T')[0];
+    const current = dailyData.get(date) || { orderCount: 0, orderSum: 0 };
+    
+    // finishedPrice - цена после скидок (что платит покупатель)
+    const orderPrice = order.finishedPrice || order.priceWithDisc || order.totalPrice || 0;
+    current.orderCount += 1;
+    current.orderSum += orderPrice;
+    
+    dailyData.set(date, current);
+  });
+
+  const result = Array.from(dailyData.entries())
+    .map(([date, data]) => ({
+      date,
+      orderCount: data.orderCount,
+      orderSum: Math.round(data.orderSum)
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  
+  const totalOrders = result.reduce((sum, day) => sum + day.orderCount, 0);
+  const totalSum = result.reduce((sum, day) => sum + day.orderSum, 0);
+  
+  console.log(`✅ Агрегировано ${result.length} дней ЗАКАЗОВ: ${totalOrders} заказов на ${totalSum}₽`);
+  if (result.length > 0) {
+    console.log(`  📅 Первый день: ${result[0].date}, заказов: ${result[0].orderCount}, сумма: ${result[0].orderSum}₽`);
+    console.log(`  📅 Последний день: ${result[result.length - 1].date}, заказов: ${result[result.length - 1].orderCount}, сумма: ${result[result.length - 1].orderSum}₽`);
+    
+    // Логируем сегодняшние заказы отдельно
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayData = result.find(d => d.date === todayStr);
+    if (todayData) {
+      console.log(`  📅 СЕГОДНЯ (${todayStr}): ${todayData.orderCount} заказов на ${todayData.orderSum}₽`);
+    } else {
+      console.log(`  ⚠️ СЕГОДНЯ (${todayStr}): нет заказов в данных`);
+    }
+  }
+  
+  return result;
 }
 
 /**
  * Извлечение поисковых запросов из данных
+ * ВАЖНО: Возвращаем пустой массив, так как реальные поисковые запросы 
+ * доступны только через WB Analytics API (POST /api/v2/search-report/product/search-texts)
+ * Не используем фейковые данные из названий товаров
  */
 function extractSearchQueries(salesData: any[]): Array<{ query: string; frequency: number; orders: number; revenue: number }> {
-  const queries = new Map<string, { frequency: number; orders: number; revenue: number }>();
-  
-  salesData.forEach(sale => {
-    if (sale.subject) {
-      const words = sale.subject.toLowerCase().split(' ').filter((w: string) => w.length > 3);
-      words.forEach((word: string) => {
-        const current = queries.get(word) || { frequency: 0, orders: 0, revenue: 0 };
-        current.frequency += 1;
-        current.orders += 1;
-        current.revenue += sale.finishedPrice || 0;
-        queries.set(word, current);
-      });
-    }
-  });
-
-  return Array.from(queries.entries())
-    .sort((a, b) => b[1].frequency - a[1].frequency)
-    .slice(0, 10)
-    .map(([query, data]) => ({
-      query,
-      frequency: data.frequency,
-      orders: data.orders,
-      revenue: Math.round(data.revenue)
-    }));
+  // TODO: Интегрировать с WB Analytics API для получения реальных поисковых запросов
+  // Пока возвращаем пустой массив вместо фейковых данных
+  return [];
 }
 
 /**
  * Агрегация по категориям
+ * Использует поле subject из WB API (это реальная категория товара)
  */
 function aggregateByCategory(salesData: any[]): Array<{ category: string; revenue: number; orders: number; avgPrice: number }> {
   const categories = new Map<string, { revenue: number; orders: number }>();
   
   salesData.forEach(sale => {
-    const category = sale.category || sale.subject || 'Без категории';
+    // subject - это реальная категория товара из WB (например "Платья", "Балаклавы")
+    // Не используем если нет subject - не добавляем "Без категории"
+    const category = sale.subject;
+    if (!category) return;
+    
     const current = categories.get(category) || { revenue: 0, orders: 0 };
-    current.revenue += sale.finishedPrice || 0;
+    current.revenue += sale.finishedPrice || sale.retailPriceWithDisc || 0;
     current.orders += 1;
     categories.set(category, current);
   });
+
+  // Возвращаем только если есть реальные данные
+  if (categories.size === 0) {
+    return [];
+  }
 
   return Array.from(categories.entries())
     .sort((a, b) => b[1].revenue - a[1].revenue)
@@ -1680,13 +2848,44 @@ function aggregateByCategory(salesData: any[]): Array<{ category: string; revenu
 /**
  * Генерация URL изображения товара
  * Используем CDN Wildberries basket для получения изображений
+ * 
+ * Правильная формула определения basket:
+ * vol 0-143 → basket-01
+ * vol 144-287 → basket-02
+ * vol 288-431 → basket-03
+ * vol 432-719 → basket-04
+ * vol 720-1007 → basket-05
+ * vol 1008-1061 → basket-06
+ * vol 1062-1115 → basket-07
+ * vol 1116-1169 → basket-08
+ * vol 1170-1313 → basket-09
+ * vol 1314-1601 → basket-10
+ * vol 1602-1655 → basket-11
+ * vol 1656-1919 → basket-12
+ * vol 1920-2045 → basket-13
+ * vol 2046+ → basket-14
  */
 function generateWBImageUrl(nmID: number): string {
   const vol = Math.floor(nmID / 100000);
   const part = Math.floor(nmID / 1000);
-  const basketNum = (vol % 10) + 1;
   
-  // Формат WB CDN: https://basket-{01-10}.wbbasket.ru/vol{vol}/part{part}/{nmID}/images/big/1.webp
-  // Используем webp для лучшей производительности
+  // Определяем номер basket по диапазону vol
+  let basketNum: number;
+  if (vol <= 143) basketNum = 1;
+  else if (vol <= 287) basketNum = 2;
+  else if (vol <= 431) basketNum = 3;
+  else if (vol <= 719) basketNum = 4;
+  else if (vol <= 1007) basketNum = 5;
+  else if (vol <= 1061) basketNum = 6;
+  else if (vol <= 1115) basketNum = 7;
+  else if (vol <= 1169) basketNum = 8;
+  else if (vol <= 1313) basketNum = 9;
+  else if (vol <= 1601) basketNum = 10;
+  else if (vol <= 1655) basketNum = 11;
+  else if (vol <= 1919) basketNum = 12;
+  else if (vol <= 2045) basketNum = 13;
+  else basketNum = 14;
+  
+  // Формат WB CDN: https://basket-{01-14}.wbbasket.ru/vol{vol}/part{part}/{nmID}/images/big/1.webp
   return `https://basket-${String(basketNum).padStart(2, '0')}.wbbasket.ru/vol${vol}/part${part}/${nmID}/images/big/1.webp`;
 }

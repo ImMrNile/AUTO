@@ -8,14 +8,59 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+model Payment {
+  id           String   @id @default(cuid())
+  userId       String
+  yookassaId   String   @unique
+  amount       Float
+  currency     String   @default("RUB")
+  status       String
+  paid         Boolean  @default(false)
+  description  String?
+  metadata     Json?
+  receiptEmail String?
+  createdAt    DateTime @default(now())
+  paidAt       DateTime?
+  canceledAt   DateTime?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([yookassaId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+model WithdrawalRequest {
+  id              String    @id @default(cuid())
+  userId          String
+  amount          Float
+  status          String    @default("pending")
+  paymentMethod   String
+  paymentDetails  Json
+  message         String?
+  processedAt     DateTime?
+  processedBy     String?
+  rejectionReason String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("withdrawal_requests")
+}
+
 model User {
   id               String     @id @default(cuid())
   email            String     @unique
   name             String?
   avatarUrl        String?
+  passwordHash     String?    // Хеш пароля (bcrypt)
   role             UserRole   @default(USER)
   isActive         Boolean    @default(true)
-  supabaseId       String     @unique
+  supabaseId       String?    @unique // Сделано опциональным для пользователей без Supabase
   balance          Float      @default(0) // Баланс пользователя в рублях
   lastLoginAt      DateTime?
   emailVerified    DateTime?
@@ -24,6 +69,14 @@ model User {
   telegramUsername String?    // Telegram username
   telegramPhotoUrl String?    // Telegram profile photo
   telegramAuthDate DateTime?  // Дата последней авторизации через Telegram
+  
+  // Реферальная система
+  referralCode       String?    @unique // Уникальный реферальный код пользователя
+  referredById       String?    // ID инфлюенсера, который пригласил этого пользователя
+  isInfluencer       Boolean    @default(false) // Является ли пользователь инфлюенсером
+  influencerPercent  Float      @default(0) // Процент от пополнений приглашенных (0-100)
+  referralBalance    Float      @default(0) // Баланс от реферальных начислений
+  
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
   products         Product[]
@@ -35,10 +88,19 @@ model User {
   telegramSessions TelegramSession[]
   promotions       ProductPromotion[]
   aiChats          ProductAiChat[]
-
+  
+  // Реферальные связи
+  referredBy         User?               @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals          User[]              @relation("UserReferrals") // Пользователи, которых пригласил этот инфлюенсер
+  referralPayments   ReferralPayment[]
+  payments           Payment[]
+  withdrawalRequests WithdrawalRequest[]
+  
   @@index([email])
   @@index([supabaseId])
   @@index([telegramId])
+  @@index([referralCode])
+  @@index([referredById])
   @@map("users")
 }
 
@@ -164,6 +226,7 @@ model Product {
   optimizations       ProductOptimization[]
   promotions          ProductPromotion[]
   aiChats             ProductAiChat[]
+  aiAdvertCampaigns   AIAdvertCampaign[]
 
   @@index([userId])
   @@index([status])
@@ -188,10 +251,37 @@ model Cabinet {
   user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   productCabinets ProductCabinet[]
   publications    ProductPublication[]
+  warehouses      SellerWarehouse[]    // Склады продавца (FBS)
 
   @@unique([userId, name])
   @@index([userId])
   @@map("cabinets")
+}
+
+// Склады продавца для FBS (Fulfillment by Seller)
+model SellerWarehouse {
+  id              String    @id @default(cuid())
+  cabinetId       String
+  wbWarehouseId   Int       // ID склада продавца в WB API
+  wbOfficeId      Int?      // ID склада WB (для привязки)
+  name            String    // Название склада
+  address         String?   // Адрес склада
+  deliveryType    Int       @default(1) // 1=FBS, 2=DBS, 3=DBW
+  cargoType       Int?      @default(1) // Тип груза
+  isActive        Boolean   @default(true)
+  isDefault       Boolean   @default(false) // Склад по умолчанию для кабинета
+  lastSyncAt      DateTime? // Последняя синхронизация с WB
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  cabinet         Cabinet   @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+
+  @@unique([cabinetId, wbWarehouseId])
+  @@index([cabinetId])
+  @@index([wbWarehouseId])
+  @@index([isActive])
+  @@index([isDefault])
+  @@map("seller_warehouses")
 }
 
 model ProductPublication {
@@ -507,6 +597,7 @@ model WbCategorySyncLog {
 enum UserRole {
   USER
   ADMIN
+  INFLUENCER
   SUPER_ADMIN
 }
 
@@ -520,20 +611,32 @@ enum PublicationStatus {
 }
 
 model ProductCreationTask {
-  id            String                @id @default(cuid())
-  userId        String
-  productId     String?
-  productName   String
-  status        ProductCreationStatus @default(CREATING)
-  progress      Int                   @default(0)
-  currentStage  String?
-  errorMessage  String?
-  metadata      Json?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
-  completedAt   DateTime?
-  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  product       Product?              @relation(fields: [productId], references: [id], onDelete: SetNull)
+  id                 String                @id @default(cuid())
+  userId             String
+  productId          String?
+  productName        String
+  status             ProductCreationStatus @default(CREATING)
+  progress           Int                   @default(0)
+  currentStage       String?
+  errorMessage       String?
+  metadata           Json?
+  // Результаты Agent1 (анализ изображения и извлечение данных)
+  agent1Result       Json?
+  agent1Status       String?
+  agent1CompletedAt  DateTime?
+  // Результаты Agent2 (генерация характеристик и SEO)
+  agent2Result       Json?
+  agent2Status       String?
+  agent2CompletedAt  DateTime?
+  // Результаты Agent3 (исправление ошибок валидации)
+  agent3Result       Json?
+  agent3Status       String?
+  agent3CompletedAt  DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  completedAt        DateTime?
+  user               User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product            Product?              @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([status])
@@ -546,6 +649,7 @@ enum ProductCreationStatus {
   CREATING
   ANALYZING
   PUBLISHING
+  CREATING_INFOGRAPHICS
   COMPLETED
   ERROR
 }
@@ -809,4 +913,157 @@ model ProductAiMessage {
   @@index([chatId])
   @@index([createdAt])
   @@map("product_ai_messages")
+}
+
+// Реферальные выплаты
+model ReferralPayment {
+  id              String   @id @default(cuid())
+  influencerId    String   // ID инфлюенсера, который получает выплату
+  referralUserId  String   // ID пользователя, который пополнил баланс
+  depositAmount   Float    // Сумма пополнения пользователя
+  percent         Float    // Процент инфлюенсера на момент выплаты
+  amount          Float    // Сумма выплаты инфлюенсеру
+  status          String   @default("completed") // completed, pending, failed
+  createdAt       DateTime @default(now())
+  
+  influencer      User     @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  
+  @@index([influencerId])
+  @@index([referralUserId])
+  @@index([createdAt])
+  @@map("referral_payments")
+}
+
+// AI-управляемая рекламная кампания
+model AIAdvertCampaign {
+  id                  String   @id @default(cuid())
+  productId           String
+  userId              String
+  cabinetId           String
+  
+  // WB Campaign данные
+  wbCampaignId        Int?     // ID кампании в WB
+  wbCampaignType      Int      @default(9) // 8=авто, 9=поиск+каталог (ручная)
+  wbCampaignStatus    Int      @default(4) // 4=готова, 9=активна, 11=пауза, 7=завершена
+  campaignName        String
+  
+  // Бюджет и финансы
+  weeklyBudget        Float    // Бюджет на неделю
+  totalDeposited      Float    @default(0) // Всего внесено
+  totalSpent          Float    @default(0) // Всего потрачено
+  currentBalance      Float    @default(0) // Текущий баланс кампании
+  
+  // AI управление
+  aiEnabled           Boolean  @default(true)
+  aiThreadId          String?  // OpenAI Thread ID
+  lastAiCheckAt       DateTime?
+  nextAiCheckAt       DateTime?
+  checkIntervalHours  Int      @default(3) // Интервал проверки в часах
+  
+  // Настройки кампании
+  bidType             String   @default("manual") // manual или unified
+  placementSearch     Boolean  @default(true)
+  placementRecommendations Boolean @default(true)
+  
+  // Метрики
+  totalViews          Int      @default(0)
+  totalClicks         Int      @default(0)
+  totalOrders         Int      @default(0)
+  totalRevenue        Float    @default(0)
+  avgCTR              Float    @default(0)
+  avgCPC              Float    @default(0)
+  avgROI              Float    @default(0)
+  
+  // Сроки
+  startDate           DateTime @default(now())
+  endDate             DateTime // Дата окончания (через 7 дней)
+  
+  // Статусы
+  status              String   @default("CREATING") // CREATING, ACTIVE, PAUSED, COMPLETED, ERROR
+  errorMessage        String?
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  // Связи
+  product             Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  actions             AIAdvertAction[]
+  chatMessages        AIAdvertChatMessage[]
+  
+  @@index([productId])
+  @@index([userId])
+  @@index([cabinetId])
+  @@index([wbCampaignId])
+  @@index([status])
+  @@index([aiEnabled, nextAiCheckAt])
+  @@map("ai_advert_campaigns")
+}
+
+// Действия AI по управлению кампанией
+model AIAdvertAction {
+  id              String   @id @default(cuid())
+  campaignId      String
+  
+  // Тип действия
+  actionType      String   // CREATE_CAMPAIGN, CHANGE_BID, ADD_KEYWORDS, ADD_MINUS_WORDS, PAUSE, RESUME, etc.
+  priority        String   @default("medium") // critical, high, medium
+  
+  // Данные действия
+  actionData      Json     // Параметры для выполнения
+  reason          String   @db.Text // Почему AI решил это сделать
+  expectedEffect  String?  @db.Text // Ожидаемый эффект
+  
+  // Результат
+  status          String   @default("pending") // pending, executing, success, failed
+  result          Json?    // Результат выполнения
+  error           String?  @db.Text
+  
+  // Метрики до/после
+  metricsBefore   Json?    // Метрики до действия
+  metricsAfter    Json?    // Метрики после действия
+  
+  createdAt       DateTime @default(now())
+  executedAt      DateTime?
+  
+  campaign        AIAdvertCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  @@index([campaignId])
+  @@index([status])
+  @@index([actionType])
+  @@index([createdAt])
+  @@map("ai_advert_actions")
+}
+
+// Сообщения чата AI для кампании
+model AIAdvertChatMessage {
+  id          String   @id @default(cuid())
+  campaignId  String
+  
+  role        String   // "user", "assistant", "system"
+  content     String   @db.Text
+  
+  // Метаданные
+  metadata    Json?    // Дополнительные данные (действия, статистика и т.д.)
+  
+  createdAt   DateTime @default(now())
+  
+  campaign    AIAdvertCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  
+  @@index([campaignId])
+  @@index([createdAt])
+  @@map("ai_advert_chat_messages")
+}
+
+// Кеш для аналитики и других данных
+model DataCache {
+  id        String   @id @default(cuid())
+  key       String   @unique // Уникальный ключ кеша (userId:cabinetId:type:params)
+  data      Json     // Закешированные данные
+  expiresAt DateTime // Время истечения кеша
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+  @@index([expiresAt])
+  @@map("data_cache")
 }
